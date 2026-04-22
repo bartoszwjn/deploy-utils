@@ -1,3 +1,5 @@
+//! Command-line interface.
+
 use copy::CopyArgs;
 use status::StatusArgs;
 
