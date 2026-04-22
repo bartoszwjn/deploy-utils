@@ -3,11 +3,7 @@ use std::process::ExitCode;
 use anstream::AutoStream;
 use anstyle::{AnsiColor, Style};
 use clap::Parser;
-use tracing_subscriber::{
-    filter::{EnvFilter, LevelFilter},
-    layer::SubscriberExt,
-    util::SubscriberInitExt,
-};
+use tracing_subscriber::{filter::EnvFilter, layer::SubscriberExt, util::SubscriberInitExt};
 
 use deploy_utils::DeployUtilsApp;
 
@@ -31,14 +27,14 @@ fn exec() -> eyre::Result<()> {
 
     let app = DeployUtilsApp::parse();
 
-    init_tracing();
+    init_tracing(app.default_log_level());
 
     app.exec()
 }
 
-fn init_tracing() {
+fn init_tracing(default_level: tracing::Level) {
     let env_filter = EnvFilter::builder()
-        .with_default_directive(LevelFilter::WARN.into())
+        .with_default_directive(default_level.into())
         .from_env_lossy();
 
     let color_choice = AutoStream::choice(&std::io::stderr());
