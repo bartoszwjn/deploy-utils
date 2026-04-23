@@ -1,6 +1,6 @@
 //! `copy` subcommand.
 
-use crate::profile::ProfileInfo;
+use crate::profile::Profiles;
 
 /// Copy profile closures to their respective nodes without deploying them.
 #[derive(clap::Args, Debug)]
@@ -27,8 +27,8 @@ pub(super) struct CopyArgs {
 
 impl CopyArgs {
     pub(super) fn exec(self) -> eyre::Result<()> {
-        let _profiles = ProfileInfo::query(&self.flake, self.nodes.as_deref())?;
-        dbg!(_profiles);
+        let profiles = Profiles::eval(&self.flake)?.select(self.nodes.as_deref())?;
+        dbg!(profiles);
         todo!("copy")
     }
 }

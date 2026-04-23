@@ -7,6 +7,11 @@ use eyre::WrapErr;
 
 use crate::command;
 
+#[derive(Debug)]
+pub(crate) struct Profiles {
+    nodes: BTreeMap<String, Vec<ProfileInfo>>,
+}
+
 #[allow(dead_code)] // TODO: remove
 #[derive(Debug)]
 pub(crate) struct ProfileInfo {
@@ -20,51 +25,70 @@ pub(crate) struct ProfileInfo {
     pub(crate) fast_connection: bool,
 }
 
-impl ProfileInfo {
-    pub(crate) fn query(flake: &str, nodes: Option<&[String]>) -> eyre::Result<Vec<Self>> {
+impl Profiles {
+    pub(crate) fn eval(flake: &str) -> eyre::Result<Self> {
         tracing::debug!(flake, "evaluating deploy profiles");
 
         let mut deploy = eval_deploy(flake)?;
+        let num_nodes = deploy.nodes.len();
 
-        let mut profiles = Vec::new();
+        let mut nodes = BTreeMap::new();
         // `std::mem::take` the collections before iterating so that `deploy` and `node`
         // remain fully initialized and can be passed by reference to `Self::make`.
         for (node_name, mut node) in std::mem::take(&mut deploy.nodes) {
+            let mut profiles = Vec::new();
             for (profile_name, profile) in std::mem::take(&mut node.profiles) {
-                let profile_info = Self::make(&node_name, profile_name, &deploy, &node, profile)?;
+                let profile_info =
+                    ProfileInfo::make(&node_name, profile_name, &deploy, &node, profile)?;
                 profiles.push(profile_info);
             }
+            nodes.insert(node_name, profiles);
         }
 
-        match nodes {
-            None => Ok(profiles),
-            Some(nodes) => {
-                for node in nodes {
-                    let has_profiles = profiles.iter().any(|p| &p.node == node);
-                    if !has_profiles {
-                        let mut all_nodes: Vec<_> =
-                            profiles.iter().map(|p| p.node.as_str()).collect();
-                        all_nodes.sort();
-                        all_nodes.dedup();
+        let this = Self { nodes };
 
-                        return Err(eyre::eyre!("no profiles defined for node {node}")).note(
-                            format!(
-                                "profiles exist for the following nodes: {}",
-                                all_nodes.join(", ")
-                            ),
-                        );
-                    }
-                }
+        tracing::debug!(
+            num_nodes,
+            num_profiles = this.num_profiles(),
+            "done evaluating deploy profiles",
+        );
 
-                let filtered = profiles
-                    .into_iter()
-                    .filter(|p| nodes.iter().any(|n| n == &p.node))
-                    .collect();
-                Ok(filtered)
-            }
-        }
+        Ok(this)
     }
 
+    pub(crate) fn select(mut self, nodes: Option<&[String]>) -> eyre::Result<Self> {
+        let Some(nodes) = nodes else {
+            return Ok(self);
+        };
+
+        for node in nodes {
+            if !self.nodes.contains_key(node) {
+                let all_nodes: Vec<_> = self.nodes.keys().map(|n| n.as_str()).collect();
+
+                return Err(eyre::eyre!("no profiles defined for node {node}")).note(format!(
+                    "profiles exist for the following nodes: {}",
+                    all_nodes.join(", ")
+                ));
+            }
+        }
+
+        self.nodes.retain(|node, _| nodes.contains(node));
+
+        tracing::debug!(
+            num_nodes = self.nodes.len(),
+            num_profiles = self.num_profiles(),
+            "selected a subset of deploy profiles",
+        );
+
+        Ok(self)
+    }
+
+    fn num_profiles(&self) -> usize {
+        self.nodes.values().map(|ps| ps.len()).sum()
+    }
+}
+
+impl ProfileInfo {
     fn make(
         node_name: &str,
         profile_name: String,
