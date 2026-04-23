@@ -28,7 +28,7 @@ pub(super) struct CopyArgs {
 impl CopyArgs {
     pub(super) fn exec(self) -> eyre::Result<()> {
         let profiles = Profiles::eval(&self.flake)?.select(self.nodes.as_deref())?;
-        dbg!(profiles);
+        anstream::eprintln!("{}", profiles.display());
         todo!("copy")
     }
 }

@@ -31,7 +31,7 @@ pub(super) struct StatusArgs {
 impl StatusArgs {
     pub(super) fn exec(self) -> eyre::Result<()> {
         let profiles = Profiles::eval(&self.flake)?.select(self.nodes.as_deref())?;
-        dbg!(profiles);
+        anstream::eprintln!("{}", profiles.display());
         todo!("status")
     }
 }

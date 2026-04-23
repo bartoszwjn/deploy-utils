@@ -1,9 +1,11 @@
 //! Querying information about `deploy-rs` profiles.
 
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, fmt};
 
+use anstyle::{AnsiColor, Style};
 use color_eyre::Section;
 use eyre::WrapErr;
+use unicode_width::UnicodeWidthStr;
 
 use crate::command;
 
@@ -12,7 +14,6 @@ pub(crate) struct Profiles {
     nodes: BTreeMap<String, Vec<ProfileInfo>>,
 }
 
-#[allow(dead_code)] // TODO: remove
 #[derive(Debug)]
 pub(crate) struct ProfileInfo {
     pub(crate) node: String,
@@ -86,6 +87,39 @@ impl Profiles {
     fn num_profiles(&self) -> usize {
         self.nodes.values().map(|ps| ps.len()).sum()
     }
+
+    fn profiles(&self) -> impl Iterator<Item = &ProfileInfo> {
+        self.nodes.values().flatten()
+    }
+
+    pub(crate) fn display(&self) -> impl fmt::Display {
+        const HEADER: Style = Style::new().bold();
+        const NODE: Style = AnsiColor::Blue.on_default();
+
+        let node_width = self.nodes.keys().map(|n| n.width()).max().unwrap_or(0);
+        let profile_width = self
+            .profiles()
+            .map(|p| p.profile.width())
+            .max()
+            .unwrap_or(0);
+
+        fmt::from_fn(move |f| {
+            writeln!(f, "{HEADER}Profiles:{HEADER:#}")?;
+            for (node, profiles) in &self.nodes {
+                let mut first = true;
+                for profile in profiles {
+                    let profile = profile.display(profile_width);
+                    if first {
+                        writeln!(f, "  {NODE}{node:node_width$}{NODE:#} {profile}")?;
+                        first = false;
+                    } else {
+                        writeln!(f, "  {:node_width$} {profile}", "")?;
+                    }
+                }
+            }
+            Ok(())
+        })
+    }
 }
 
 impl ProfileInfo {
@@ -146,6 +180,32 @@ impl ProfileInfo {
             ssh_opts,
             user,
             fast_connection,
+        })
+    }
+
+    fn display(&self, profile_width: usize) -> impl fmt::Display {
+        const PROFILE: Style = AnsiColor::Cyan.on_default();
+        const USER: Style = AnsiColor::Yellow.on_default();
+        const SSH_USER: Style = AnsiColor::Yellow.on_default();
+        const HOSTNAME: Style = AnsiColor::Green.on_default();
+        const PATH: Style = AnsiColor::Blue.on_default();
+        const FAST: Style = AnsiColor::Red.on_default();
+        const SSH_OPTS: Style = AnsiColor::Cyan.on_default();
+
+        fmt::from_fn(move |f| {
+            write!(
+                f,
+                "{PROFILE}{:profile_width$}{PROFILE:#} as {USER}{}{USER:#} \
+                    at {SSH_USER}{}{SSH_USER:#}@{HOSTNAME}{}{HOSTNAME:#}:{PATH}{}{PATH:#}",
+                self.profile, self.user, self.ssh_user, self.hostname, self.profile_path,
+            )?;
+            if self.fast_connection {
+                write!(f, " {FAST}(fast){FAST:#}")?;
+            }
+            if !self.ssh_opts.is_empty() {
+                write!(f, " with {SSH_OPTS}{}{SSH_OPTS:#}", self.ssh_opts.join(" "))?;
+            }
+            Ok(())
         })
     }
 }
