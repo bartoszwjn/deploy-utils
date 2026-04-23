@@ -22,7 +22,7 @@ pub(crate) struct ProfileInfo {
 
 impl ProfileInfo {
     pub(crate) fn query(flake: &str, nodes: Option<&[String]>) -> eyre::Result<Vec<Self>> {
-        tracing::info!(flake, "evaluating deploy profiles");
+        tracing::debug!(flake, "evaluating deploy profiles");
 
         let mut deploy = eval_deploy(flake)?;
 

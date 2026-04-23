@@ -48,7 +48,7 @@ fn make_command(
 }
 
 fn get_output(mut command: Command) -> Result<(Command, Output), CmdError> {
-    tracing::debug!(
+    tracing::trace!(
         program = %command.get_program().display(),
         args = %display_args(&command),
         "executing external program",
