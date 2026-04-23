@@ -1,5 +1,6 @@
 mod cli;
 mod command;
+mod display;
 mod profile;
 
 #[doc(hidden)]

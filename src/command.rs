@@ -2,12 +2,14 @@
 
 use std::{
     ffi::OsStr,
-    fmt::{self, Display},
+    fmt,
     process::{Command, Output},
     str::Utf8Error,
 };
 
 use color_eyre::{Section, SectionExt};
+
+use crate::display;
 
 #[allow(dead_code)] // TODO: remove
 pub(crate) fn output(
@@ -48,7 +50,7 @@ fn make_command(
 fn get_output(mut command: Command) -> Result<(Command, Output), CmdError> {
     tracing::debug!(
         program = %command.get_program().display(),
-        args = %show_args(&command),
+        args = %display_args(&command),
         "executing external program",
     );
 
@@ -117,7 +119,7 @@ impl CmdError {
     }
 
     pub(crate) fn into_eyre(self) -> eyre::Report {
-        let command_section = show_command(&self.inner.command)
+        let command_section = display_command(&self.inner.command)
             .to_string()
             .header("Command:");
 
@@ -150,23 +152,23 @@ impl fmt::Display for CmdError {
             CmdErrorKind::Spawn(_) => write!(
                 f,
                 "failed to execute external program {}",
-                show_program(&self.inner.command),
+                display_program(&self.inner.command),
             ),
             CmdErrorKind::ExitCode(output) => write!(
                 f,
                 "external program {} did not finish successfully ({})",
-                show_program(&self.inner.command),
+                display_program(&self.inner.command),
                 output.status,
             ),
             CmdErrorKind::Utf8(_, _) => write!(
                 f,
                 "output of external program {} is not valid utf-8",
-                show_program(&self.inner.command),
+                display_program(&self.inner.command),
             ),
             CmdErrorKind::Json(_, _) => write!(
                 f,
                 "failed to decode output of external program {}",
-                show_program(&self.inner.command),
+                display_program(&self.inner.command),
             ),
         }
     }
@@ -183,61 +185,19 @@ impl std::error::Error for CmdError {
     }
 }
 
-fn show_command(command: &Command) -> impl Display {
-    show_arg_sequence(|| {
+fn display_command(command: &Command) -> impl fmt::Display {
+    display::display_command_args(|| {
         [command.get_program()]
             .into_iter()
             .chain(command.get_args())
+            .map(|s| s.to_string_lossy())
     })
 }
 
-fn show_program(command: &Command) -> impl Display {
-    show_arg(command.get_program())
+fn display_program(command: &Command) -> impl fmt::Display {
+    display::display_command_args(|| std::iter::once(command.get_program().to_string_lossy()))
 }
 
-fn show_args(command: &Command) -> impl Display {
-    show_arg_sequence(|| command.get_args())
-}
-
-fn show_arg_sequence<F, Iter, Item>(args: F) -> impl Display
-where
-    F: Fn() -> Iter,
-    Iter: IntoIterator<Item = Item>,
-    Item: AsRef<OsStr>,
-{
-    fmt::from_fn(move |f| {
-        let mut first = true;
-        for arg in args() {
-            if first {
-                first = false;
-            } else {
-                write!(f, " ")?;
-            }
-            write!(f, "{}", show_arg(arg.as_ref()))?;
-        }
-        Ok(())
-    })
-}
-
-fn show_arg(arg: &OsStr) -> impl Display {
-    fn needs_quoting(c: char) -> bool {
-        match c {
-            '"' | '\'' | '\\' => true,
-            _ if c.is_whitespace() => true,
-
-            _ if c.is_alphanumeric() => false,
-            _ if c.is_ascii_punctuation() => false,
-
-            _ => true,
-        }
-    }
-
-    fmt::from_fn(|f| {
-        let arg = arg.to_string_lossy();
-        if arg.chars().any(needs_quoting) {
-            write!(f, "{arg:?}")
-        } else {
-            write!(f, "{arg}")
-        }
-    })
+fn display_args(command: &Command) -> impl fmt::Display {
+    display::display_command_args(|| command.get_args().map(|arg| arg.to_string_lossy()))
 }
