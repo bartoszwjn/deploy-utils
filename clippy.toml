@@ -1,0 +1,4 @@
+disallowed-methods = [
+    { path = "eyre::WrapErr::context", replacement = "eyre::WrapErr::wrap_err" },
+    { path = "eyre::WrapErr::with_context", replacement = "eyre::WrapErr::wrap_err_with" },
+]
