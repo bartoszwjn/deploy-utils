@@ -1,18 +1,24 @@
 //! Querying information about `deploy-rs` profiles.
 
-use std::{collections::BTreeMap, fmt};
+use std::{
+    collections::BTreeMap,
+    fmt::{self, Write},
+    process::Command,
+};
 
-use anstyle::{AnsiColor, Style};
 use color_eyre::Section;
 use eyre::WrapErr;
-use unicode_width::UnicodeWidthStr;
 
-use crate::command;
-use crate::natural_sort::NaturalString;
+use crate::{command, display, natural_sort::NaturalString};
 
 #[derive(Debug)]
 pub(crate) struct Profiles {
-    nodes: BTreeMap<NaturalString<'static>, BTreeMap<NaturalString<'static>, ProfileInfo>>,
+    nodes: BTreeMap<NaturalString<'static>, NodeInfo>,
+}
+
+#[derive(Debug)]
+pub(crate) struct NodeInfo {
+    profiles: BTreeMap<NaturalString<'static>, ProfileInfo>,
 }
 
 #[derive(Debug)]
@@ -44,7 +50,7 @@ impl Profiles {
                     ProfileInfo::make(&node_name, &profile_name, &deploy, &node, profile)?;
                 profiles.insert(NaturalString::owned(profile_name), profile_info);
             }
-            nodes.insert(NaturalString::owned(node_name), profiles);
+            nodes.insert(NaturalString::owned(node_name), NodeInfo { profiles });
         }
 
         let this = Self { nodes };
@@ -87,34 +93,20 @@ impl Profiles {
     }
 
     fn num_profiles(&self) -> usize {
-        self.nodes.values().map(|ps| ps.len()).sum()
-    }
-
-    fn profiles(&self) -> impl Iterator<Item = &ProfileInfo> {
-        self.nodes.values().flat_map(|profiles| profiles.values())
+        self.nodes.values().map(|node| node.profiles.len()).sum()
     }
 
     pub(crate) fn display(&self) -> impl fmt::Display {
-        const HEADER: Style = Style::new().bold();
-        const NODE: Style = AnsiColor::Blue.on_default();
+        use display::styles::{HEADER, NODE};
 
-        let node_width = self
-            .nodes
-            .keys()
-            .map(|n| n.as_str().width())
-            .max()
-            .unwrap_or(0);
-        let profile_width = self
-            .profiles()
-            .map(|p| p.profile.width())
-            .max()
-            .unwrap_or(0);
+        let node_width = display::get_max_width(self.nodes.keys().map(|n| n.as_str()));
+        let profile_width = display::get_max_width(self.profiles().map(|p| &p.profile));
 
         fmt::from_fn(move |f| {
             writeln!(f, "{HEADER}Profiles:{HEADER:#}")?;
-            for (node, profiles) in &self.nodes {
+            for (node, node_info) in &self.nodes {
                 let mut first = true;
-                for profile in profiles.values() {
+                for profile in node_info.profiles.values() {
                     let profile = profile.display(profile_width);
                     if first {
                         let node = node.as_str();
@@ -127,6 +119,20 @@ impl Profiles {
             }
             Ok(())
         })
+    }
+
+    pub(crate) fn nodes(&self) -> impl ExactSizeIterator<Item = &NodeInfo> {
+        self.nodes.values()
+    }
+
+    pub(crate) fn profiles(&self) -> impl Iterator<Item = &ProfileInfo> {
+        self.nodes().flat_map(NodeInfo::profiles)
+    }
+}
+
+impl NodeInfo {
+    pub(crate) fn profiles(&self) -> impl ExactSizeIterator<Item = &ProfileInfo> {
+        self.profiles.values()
     }
 }
 
@@ -192,13 +198,7 @@ impl ProfileInfo {
     }
 
     fn display(&self, profile_width: usize) -> impl fmt::Display {
-        const PROFILE: Style = AnsiColor::Cyan.on_default();
-        const USER: Style = AnsiColor::Yellow.on_default();
-        const SSH_USER: Style = AnsiColor::Yellow.on_default();
-        const HOSTNAME: Style = AnsiColor::Green.on_default();
-        const PATH: Style = AnsiColor::Blue.on_default();
-        const FAST: Style = AnsiColor::Red.on_default();
-        const SSH_OPTS: Style = AnsiColor::Cyan.on_default();
+        use display::styles::{FAST, HOSTNAME, PATH, PROFILE, SSH_OPTS, SSH_USER, USER};
 
         fmt::from_fn(move |f| {
             write!(
@@ -216,6 +216,69 @@ impl ProfileInfo {
             Ok(())
         })
     }
+
+    pub(crate) fn get_nix_sshopts(&self) -> String {
+        // Nix 2.26 and later parse NIX_SSHOPTS as POSIX shell arguments:
+        // https://github.com/NixOS/nix/pull/12020
+        //
+        // Earlier Nix versions and Lix (as of 2.95.1,
+        // see https://git.lix.systems/lix-project/lix/src/tag/2.95.1/lix/libstore/ssh.cc#L39)
+        // just split the value on whitespace.
+        //
+        // To try to make it work for both implementations,
+        // we only quote values that contain characters that have special meaning for Nix 2.26+.
+        // That way simple values will be parsed correctly by both implementations.
+        // Complex values will be parsed correctly only by Nix 2.26+.
+
+        fn needs_quoting(c: char) -> bool {
+            match c {
+                '\'' | '"' | '\\' => true,
+                _ if c.is_whitespace() => true,
+                _ => false,
+            }
+        }
+
+        fn quote_arg(arg: &str) -> impl fmt::Display {
+            fmt::from_fn(move |f| {
+                if arg.is_empty() || arg.chars().any(needs_quoting) {
+                    f.write_str("'")?;
+                    let mut s = arg;
+                    while !s.is_empty() {
+                        match s.split_once('\'') {
+                            Some((chunk, rest)) => {
+                                f.write_str(chunk)?;
+                                f.write_str("'\\''")?;
+                                s = rest;
+                            }
+                            None => {
+                                f.write_str(s)?;
+                                s = "";
+                            }
+                        }
+                    }
+                    f.write_str("'")?;
+                    Ok(())
+                } else {
+                    write!(f, "{}", arg)
+                }
+            })
+        }
+
+        let mut result = String::with_capacity(
+            self.ssh_opts.iter().map(|opt| opt.len()).sum::<usize>() + self.ssh_opts.len(),
+        );
+        let mut first = true;
+        for arg in &self.ssh_opts {
+            let arg = quote_arg(arg);
+            if first {
+                write!(&mut result, "{}", arg).expect("");
+                first = false;
+            } else {
+                write!(&mut result, " {}", arg).expect("");
+            }
+        }
+        result
+    }
 }
 
 fn eval_deploy(flake: &str) -> eyre::Result<Deploy> {
@@ -231,18 +294,16 @@ fn eval_deploy(flake: &str) -> eyre::Result<Deploy> {
         }\
     ";
 
-    command::output_json(
-        "nix",
-        [
-            "eval",
-            "--json",
-            "--apply",
-            REMOVE_PROFILE_PATH_EXPR,
-            "--",
-            &format!("{flake}#.deploy"),
-        ],
-    )
-    .map_err(|e| e.into_eyre())
+    let mut cmd = Command::new("nix");
+    cmd.args([
+        "eval",
+        "--json",
+        "--apply",
+        REMOVE_PROFILE_PATH_EXPR,
+        "--",
+        &format!("{flake}#.deploy"),
+    ]);
+    command::output_json(cmd).map_err(|e| e.into_eyre())
 }
 
 fn combine_generic_options(

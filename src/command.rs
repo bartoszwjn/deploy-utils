@@ -1,9 +1,8 @@
 //! Running external commands.
 
 use std::{
-    ffi::OsStr,
     fmt,
-    process::{Command, Output},
+    process::{Command, ExitStatus, Output},
     str::Utf8Error,
 };
 
@@ -11,12 +10,26 @@ use color_eyre::{Section, SectionExt};
 
 use crate::display;
 
+pub(crate) fn run(mut command: Command) -> Result<(), CmdError> {
+    tracing::trace!(
+        program = %command.get_program().display(),
+        args = %display_args(&command),
+        "executing external program",
+    );
+
+    let status = match command.status() {
+        Ok(status) => status,
+        Err(err) => return Err(CmdError::spawn(command, err)),
+    };
+    if !status.success() {
+        return Err(CmdError::exit_code_status(command, status));
+    }
+    Ok(())
+}
+
 #[allow(dead_code)] // TODO: remove
-pub(crate) fn output(
-    program: impl AsRef<OsStr>,
-    args: impl IntoIterator<Item = impl AsRef<OsStr>>,
-) -> Result<String, CmdError> {
-    let (command, mut output) = get_output(make_command(program, args))?;
+pub(crate) fn output(command: Command) -> Result<String, CmdError> {
+    let (command, mut output) = get_output(command)?;
     match String::from_utf8(output.stdout) {
         Ok(string) => Ok(string),
         Err(error) => {
@@ -27,24 +40,12 @@ pub(crate) fn output(
     }
 }
 
-pub(crate) fn output_json<T: serde::de::DeserializeOwned>(
-    program: impl AsRef<OsStr>,
-    args: impl IntoIterator<Item = impl AsRef<OsStr>>,
-) -> Result<T, CmdError> {
-    let (command, output) = get_output(make_command(program, args))?;
+pub(crate) fn output_json<T: serde::de::DeserializeOwned>(command: Command) -> Result<T, CmdError> {
+    let (command, output) = get_output(command)?;
     match serde_json::from_slice(&output.stdout) {
         Ok(value) => Ok(value),
         Err(error) => Err(CmdError::json(command, output, error)),
     }
-}
-
-fn make_command(
-    program: impl AsRef<OsStr>,
-    args: impl IntoIterator<Item = impl AsRef<OsStr>>,
-) -> Command {
-    let mut cmd = Command::new(program);
-    cmd.args(args);
-    cmd
 }
 
 fn get_output(mut command: Command) -> Result<(Command, Output), CmdError> {
@@ -59,7 +60,7 @@ fn get_output(mut command: Command) -> Result<(Command, Output), CmdError> {
         Err(err) => return Err(CmdError::spawn(command, err)),
     };
     if !output.status.success() {
-        return Err(CmdError::exit_code(command, output));
+        return Err(CmdError::exit_code_output(command, output));
     }
     Ok((command, output))
 }
@@ -78,7 +79,8 @@ struct CmdErrorInner {
 #[derive(Debug)]
 enum CmdErrorKind {
     Spawn(std::io::Error),
-    ExitCode(Output),
+    ExitCodeStatus(ExitStatus),
+    ExitCodeOutput(Output),
     Utf8(Output, Utf8Error),
     Json(Output, serde_json::Error),
 }
@@ -94,8 +96,13 @@ impl CmdError {
         Self::new(command, kind)
     }
 
-    fn exit_code(command: Command, output: Output) -> Self {
-        let kind = CmdErrorKind::ExitCode(output);
+    fn exit_code_status(command: Command, status: ExitStatus) -> Self {
+        let kind = CmdErrorKind::ExitCodeStatus(status);
+        Self::new(command, kind)
+    }
+
+    fn exit_code_output(command: Command, output: Output) -> Self {
+        let kind = CmdErrorKind::ExitCodeOutput(output);
         Self::new(command, kind)
     }
 
@@ -112,9 +119,20 @@ impl CmdError {
     fn output(&self) -> Option<&Output> {
         match &self.inner.kind {
             CmdErrorKind::Spawn(_) => None,
-            CmdErrorKind::ExitCode(output) => Some(output),
+            CmdErrorKind::ExitCodeStatus(_) => None,
+            CmdErrorKind::ExitCodeOutput(output) => Some(output),
             CmdErrorKind::Utf8(output, _) => Some(output),
             CmdErrorKind::Json(output, _) => Some(output),
+        }
+    }
+
+    pub(crate) fn is_exit_code_error(&self) -> bool {
+        match self.inner.kind {
+            CmdErrorKind::Spawn(_) => false,
+            CmdErrorKind::ExitCodeStatus(_) => true,
+            CmdErrorKind::ExitCodeOutput(_) => true,
+            CmdErrorKind::Utf8(_, _) => false,
+            CmdErrorKind::Json(_, _) => false,
         }
     }
 
@@ -122,6 +140,10 @@ impl CmdError {
         let command_section = display_command(&self.inner.command)
             .to_string()
             .header("Command:");
+
+        let env_section = display_env(&self.inner.command)
+            .to_string()
+            .header("Environment overrides:");
 
         let stdout = self
             .output()
@@ -141,6 +163,7 @@ impl CmdError {
 
         eyre::Report::from(self)
             .section(command_section)
+            .section(env_section)
             .section(stdout_section)
             .section(stderr_section)
     }
@@ -154,11 +177,12 @@ impl fmt::Display for CmdError {
                 "failed to execute external program {}",
                 display_program(&self.inner.command),
             ),
-            CmdErrorKind::ExitCode(output) => write!(
+            CmdErrorKind::ExitCodeStatus(status)
+            | CmdErrorKind::ExitCodeOutput(Output { status, .. }) => write!(
                 f,
                 "external program {} did not finish successfully ({})",
                 display_program(&self.inner.command),
-                output.status,
+                status,
             ),
             CmdErrorKind::Utf8(_, _) => write!(
                 f,
@@ -178,7 +202,8 @@ impl std::error::Error for CmdError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match &self.inner.kind {
             CmdErrorKind::Spawn(error) => Some(error),
-            CmdErrorKind::ExitCode(_) => None,
+            CmdErrorKind::ExitCodeStatus(_) => None,
+            CmdErrorKind::ExitCodeOutput(_) => None,
             CmdErrorKind::Utf8(_, error) => Some(error),
             CmdErrorKind::Json(_, error) => Some(error),
         }
@@ -200,4 +225,16 @@ fn display_program(command: &Command) -> impl fmt::Display {
 
 fn display_args(command: &Command) -> impl fmt::Display {
     display::display_command_args(|| command.get_args().map(|arg| arg.to_string_lossy()))
+}
+
+fn display_env(command: &Command) -> impl fmt::Display {
+    fmt::from_fn(move |f| {
+        for (name, value) in command.get_envs() {
+            match value {
+                Some(value) => writeln!(f, "{}={}", name.display(), value.display())?,
+                None => writeln!(f, "unset {}", name.display())?,
+            }
+        }
+        Ok(())
+    })
 }

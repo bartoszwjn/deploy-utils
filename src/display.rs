@@ -2,6 +2,37 @@
 
 use std::fmt;
 
+use unicode_width::UnicodeWidthStr;
+
+/// ANSI text styles used for displaying elements.
+pub(crate) mod styles {
+    use anstyle::{AnsiColor, Style};
+
+    // Section headers.
+    pub(crate) const HEADER: Style = Style::new().bold();
+
+    // `ProfileInfo` elements.
+    pub(crate) const NODE: Style = AnsiColor::Blue.on_default();
+    pub(crate) const PROFILE: Style = AnsiColor::Cyan.on_default();
+    pub(crate) const USER: Style = AnsiColor::Yellow.on_default();
+    pub(crate) const SSH_USER: Style = AnsiColor::Yellow.on_default();
+    pub(crate) const HOSTNAME: Style = AnsiColor::Green.on_default();
+    pub(crate) const PATH: Style = AnsiColor::Blue.on_default();
+    pub(crate) const FAST: Style = AnsiColor::Red.on_default();
+    pub(crate) const SSH_OPTS: Style = AnsiColor::Cyan.on_default();
+
+    pub(crate) const SUCCESS: Style = AnsiColor::Green.on_default();
+    pub(crate) const FAILURE: Style = AnsiColor::Red.on_default();
+}
+
+pub(crate) fn get_max_width(elements: impl IntoIterator<Item = impl AsRef<str>>) -> usize {
+    elements
+        .into_iter()
+        .map(|elem| UnicodeWidthStr::width(elem.as_ref()))
+        .max()
+        .unwrap_or(0)
+}
+
 pub(crate) fn display_command_args<Iter>(make_args: impl Fn() -> Iter) -> impl fmt::Display
 where
     Iter: Iterator,
