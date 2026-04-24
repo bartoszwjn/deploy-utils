@@ -41,7 +41,20 @@
             usNodes = builtins.genList (n: mkNode "us-srv-${toString (n + 1)}" (mkArea n "fi")) 6;
             customNodes = builtins.genList (n: mkNode "custom-node-${toString (n + 1)}" (mkArea n "custom")) 3;
           in
-          builtins.listToAttrs (euNodes ++ usNodes ++ customNodes);
+          builtins.listToAttrs (euNodes ++ usNodes ++ customNodes)
+          // {
+            xxl = {
+              hostname = "xxl.${mkArea 42 "xxl"}.subdomain.domain.tld";
+              profiles = builtins.listToAttrs (
+                builtins.genList (n: {
+                  name = "profile-${toString (n + 1)}";
+                  value = {
+                    path = drv "xxl-profile-${toString (n + 1)}";
+                  };
+                }) 15
+              );
+            };
+          };
       };
     };
 }

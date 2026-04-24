@@ -1,6 +1,7 @@
 mod cli;
 mod command;
 mod display;
+mod natural_sort;
 mod profile;
 
 #[doc(hidden)]

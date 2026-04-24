@@ -8,10 +8,11 @@ use eyre::WrapErr;
 use unicode_width::UnicodeWidthStr;
 
 use crate::command;
+use crate::natural_sort::NaturalString;
 
 #[derive(Debug)]
 pub(crate) struct Profiles {
-    nodes: BTreeMap<String, Vec<ProfileInfo>>,
+    nodes: BTreeMap<NaturalString<'static>, BTreeMap<NaturalString<'static>, ProfileInfo>>,
 }
 
 #[derive(Debug)]
@@ -37,13 +38,13 @@ impl Profiles {
         // `std::mem::take` the collections before iterating so that `deploy` and `node`
         // remain fully initialized and can be passed by reference to `Self::make`.
         for (node_name, mut node) in std::mem::take(&mut deploy.nodes) {
-            let mut profiles = Vec::new();
+            let mut profiles = BTreeMap::new();
             for (profile_name, profile) in std::mem::take(&mut node.profiles) {
                 let profile_info =
-                    ProfileInfo::make(&node_name, profile_name, &deploy, &node, profile)?;
-                profiles.push(profile_info);
+                    ProfileInfo::make(&node_name, &profile_name, &deploy, &node, profile)?;
+                profiles.insert(NaturalString::owned(profile_name), profile_info);
             }
-            nodes.insert(node_name, profiles);
+            nodes.insert(NaturalString::owned(node_name), profiles);
         }
 
         let this = Self { nodes };
@@ -63,7 +64,7 @@ impl Profiles {
         };
 
         for node in nodes {
-            if !self.nodes.contains_key(node) {
+            if !self.nodes.contains_key(&NaturalString::borrowed(node)) {
                 let all_nodes: Vec<_> = self.nodes.keys().map(|n| n.as_str()).collect();
 
                 return Err(eyre::eyre!("no profiles defined for node {node}")).note(format!(
@@ -73,7 +74,8 @@ impl Profiles {
             }
         }
 
-        self.nodes.retain(|node, _| nodes.contains(node));
+        self.nodes
+            .retain(|node, _| nodes.iter().any(|n| node.as_str() == n));
 
         tracing::debug!(
             num_nodes = self.nodes.len(),
@@ -89,14 +91,19 @@ impl Profiles {
     }
 
     fn profiles(&self) -> impl Iterator<Item = &ProfileInfo> {
-        self.nodes.values().flatten()
+        self.nodes.values().flat_map(|profiles| profiles.values())
     }
 
     pub(crate) fn display(&self) -> impl fmt::Display {
         const HEADER: Style = Style::new().bold();
         const NODE: Style = AnsiColor::Blue.on_default();
 
-        let node_width = self.nodes.keys().map(|n| n.width()).max().unwrap_or(0);
+        let node_width = self
+            .nodes
+            .keys()
+            .map(|n| n.as_str().width())
+            .max()
+            .unwrap_or(0);
         let profile_width = self
             .profiles()
             .map(|p| p.profile.width())
@@ -107,9 +114,10 @@ impl Profiles {
             writeln!(f, "{HEADER}Profiles:{HEADER:#}")?;
             for (node, profiles) in &self.nodes {
                 let mut first = true;
-                for profile in profiles {
+                for profile in profiles.values() {
                     let profile = profile.display(profile_width);
                     if first {
+                        let node = node.as_str();
                         writeln!(f, "  {NODE}{node:node_width$}{NODE:#} {profile}")?;
                         first = false;
                     } else {
@@ -125,7 +133,7 @@ impl Profiles {
 impl ProfileInfo {
     fn make(
         node_name: &str,
-        profile_name: String,
+        profile_name: &str,
         deploy: &Deploy,
         node: &Node,
         profile: Profile,
@@ -151,14 +159,14 @@ impl ProfileInfo {
         let profile_path = if let Some(explicit) = profile.profile_path {
             explicit
         } else {
-            match (user.as_str(), profile_name.as_str()) {
+            match (user.as_str(), profile_name) {
                 ("root", "system") => "/nix/var/nix/profiles/system".to_owned(),
                 ("root", _) => {
                     format!("/nix/var/nix/profiles/per-user/root/{profile_name}")
                 }
                 (_, _) => {
                     let n = node_name;
-                    let p = profile_name.as_str();
+                    let p = profile_name;
                     return Err(eyre::eyre!(
                         "cannot determine profile path for a non-root user {user}"
                     )
@@ -173,7 +181,7 @@ impl ProfileInfo {
 
         Ok(Self {
             node: node_name.to_owned(),
-            profile: profile_name,
+            profile: profile_name.to_owned(),
             hostname: node.hostname.clone(),
             profile_path,
             ssh_user,
