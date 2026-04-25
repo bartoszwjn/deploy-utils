@@ -1,6 +1,11 @@
 //! `status` subcommand.
 
-use crate::profile::Profiles;
+use std::fmt;
+
+use crate::{
+    display,
+    profile::{ProfileInfo, Profiles},
+};
 
 /// Check if deployed profiles match local configuration.
 #[derive(clap::Args, Debug)]
@@ -32,6 +37,188 @@ impl StatusArgs {
     pub(super) fn exec(self) -> eyre::Result<()> {
         let profiles = Profiles::eval(&self.flake)?.select(self.nodes.as_deref())?;
         anstream::eprintln!("{}", profiles.display());
-        todo!("status")
+
+        let with_remote = self.query_remote_profiles(&profiles)?;
+        let results = self.eval_local_profiles(with_remote)?;
+
+        anstream::eprintln!("{}", self.display_results(&results));
+
+        Ok(())
+    }
+
+    fn query_remote_profiles<'a>(
+        &self,
+        _profiles: &'a Profiles,
+    ) -> eyre::Result<Vec<Vec<(&'a ProfileInfo, QueryResult)>>> {
+        todo!("query remote profiles")
+    }
+
+    fn eval_local_profiles<'a>(
+        &self,
+        _with_remote: Vec<Vec<(&'a ProfileInfo, QueryResult)>>,
+    ) -> eyre::Result<Vec<Vec<EvalResult<'a>>>> {
+        todo!("evaluate local profiles")
+    }
+
+    fn display_results(&self, results: &[Vec<EvalResult<'_>>]) -> impl fmt::Display {
+        use display::styles::{HEADER, NODE, PROFILE};
+
+        let node_width = display::get_max_width(
+            results
+                .iter()
+                .flat_map(|node| node.first())
+                .map(|(profile, _, _)| &profile.node),
+        );
+        let profile_width = display::get_max_width(
+            results
+                .iter()
+                .flat_map(|node| node.iter())
+                .map(|(profile, _, _)| &profile.profile),
+        );
+
+        fmt::from_fn(move |f| {
+            writeln!(f, "{HEADER}Status:{HEADER:#}")?;
+            for node in results {
+                let mut first = true;
+                for (profile, query_result, local_path) in node {
+                    if first {
+                        write!(f, "  {NODE}{:node_width$}{NODE:#}", profile.node)?;
+                        first = false;
+                    } else {
+                        write!(f, "  {:node_width$}", "")?;
+                    }
+
+                    let status = ProfileStatus::from_paths(query_result, local_path.as_deref());
+                    writeln!(
+                        f,
+                        " {PROFILE}{:profile_width$}{PROFILE:#} {}",
+                        profile.profile,
+                        status.display(node_width, self.show_paths),
+                    )?;
+                }
+            }
+            Ok(())
+        })
+    }
+}
+
+type EvalResult<'a> = (&'a ProfileInfo, QueryResult, Option<String>);
+
+#[allow(dead_code)] // TODO: remove
+#[derive(Debug)]
+enum QueryResult {
+    Valid {
+        deployed_path: String,
+        needs_reboot: bool,
+    },
+    Invalid,
+    Missing,
+    Unknown,
+}
+
+#[derive(Debug)]
+enum ProfileStatus<'a> {
+    UpToDate {
+        path: &'a str,
+    },
+    NeedsReboot {
+        path: &'a str,
+    },
+    Outdated {
+        deployed_path: &'a str,
+        local_path: &'a str,
+    },
+    Invalid {
+        local_path: Option<&'a str>,
+    },
+    Missing {
+        local_path: Option<&'a str>,
+    },
+    Unknown {
+        deployed_path: Option<&'a str>,
+        local_path: Option<&'a str>,
+    },
+}
+
+impl<'a> ProfileStatus<'a> {
+    fn from_paths(remote: &'a QueryResult, local_path: Option<&'a str>) -> Self {
+        match remote {
+            QueryResult::Valid {
+                deployed_path,
+                needs_reboot,
+            } => match local_path {
+                Some(local_path) if local_path == deployed_path => {
+                    if *needs_reboot {
+                        Self::NeedsReboot { path: local_path }
+                    } else {
+                        Self::UpToDate { path: local_path }
+                    }
+                }
+                Some(local_path) => Self::Outdated {
+                    deployed_path,
+                    local_path,
+                },
+                None => Self::Unknown {
+                    deployed_path: Some(deployed_path),
+                    local_path: None,
+                },
+            },
+            QueryResult::Invalid => Self::Invalid { local_path },
+            QueryResult::Missing => Self::Missing { local_path },
+            QueryResult::Unknown => Self::Unknown {
+                deployed_path: None,
+                local_path,
+            },
+        }
+    }
+
+    fn display(&self, node_width: usize, show_paths: bool) -> impl fmt::Display {
+        fmt::from_fn(move |f| {
+            write!(f, "{}", self.display_summary())?;
+            if show_paths {
+                match self {
+                    Self::UpToDate { path } | Self::NeedsReboot { path } => {
+                        write!(f, " {path}")?;
+                    }
+                    Self::Outdated {
+                        deployed_path,
+                        local_path,
+                    } => {
+                        write!(f, "\n  {:node_width$}   deployed path: {deployed_path}", "")?;
+                        write!(f, "\n  {:node_width$}   local path:    {local_path}", "")?;
+                    }
+                    Self::Invalid { local_path } | Self::Missing { local_path } => {
+                        if let Some(local_path) = local_path {
+                            write!(f, "\n  {:node_width$}   local path: {local_path}", "")?;
+                        }
+                    }
+                    Self::Unknown {
+                        deployed_path,
+                        local_path,
+                    } => {
+                        if let Some(deployed_path) = deployed_path {
+                            write!(f, "\n  {:node_width$}   deployed path: {deployed_path}", "")?;
+                        }
+                        if let Some(local_path) = local_path {
+                            write!(f, "\n  {:node_width$}   local path:    {local_path}", "")?;
+                        }
+                    }
+                }
+            }
+            Ok(())
+        })
+    }
+
+    fn display_summary(&self) -> impl fmt::Display {
+        use display::styles::{FAILURE, SUCCESS, UNKNOWN, WARNING};
+
+        fmt::from_fn(move |f| match self {
+            ProfileStatus::UpToDate { .. } => write!(f, "{SUCCESS}up to date{SUCCESS:#}"),
+            ProfileStatus::NeedsReboot { .. } => write!(f, "{WARNING}needs reboot{WARNING:#}"),
+            ProfileStatus::Outdated { .. } => write!(f, "{WARNING}outdated{WARNING:#}"),
+            ProfileStatus::Invalid { .. } => write!(f, "{FAILURE}invalid{FAILURE:#}"),
+            ProfileStatus::Missing { .. } => write!(f, "{WARNING}missing{WARNING:#}"),
+            ProfileStatus::Unknown { .. } => write!(f, "{UNKNOWN}unknown{UNKNOWN:#}"),
+        })
     }
 }

@@ -23,6 +23,8 @@ pub(crate) mod styles {
 
     pub(crate) const SUCCESS: Style = AnsiColor::Green.on_default();
     pub(crate) const FAILURE: Style = AnsiColor::Red.on_default();
+    pub(crate) const WARNING: Style = AnsiColor::Yellow.on_default();
+    pub(crate) const UNKNOWN: Style = AnsiColor::BrightBlack.on_default();
 }
 
 pub(crate) fn get_max_width(elements: impl IntoIterator<Item = impl AsRef<str>>) -> usize {
