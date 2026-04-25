@@ -1,8 +1,11 @@
 //! `status` subcommand.
 
-use std::fmt;
+use std::{fmt, process::Command};
+
+use color_eyre::{Section, SectionExt};
 
 use crate::{
+    command::{self, CmdChild},
     display,
     profile::{ProfileInfo, Profiles},
 };
@@ -38,7 +41,7 @@ impl StatusArgs {
         let profiles = Profiles::eval(&self.flake)?.select(self.nodes.as_deref())?;
         anstream::eprintln!("{}", profiles.display());
 
-        let with_remote = self.query_remote_profiles(&profiles)?;
+        let with_remote = self.query_deployed_profiles(&profiles)?;
         let results = self.eval_local_profiles(with_remote)?;
 
         anstream::eprintln!("{}", self.display_results(&results));
@@ -46,11 +49,120 @@ impl StatusArgs {
         Ok(())
     }
 
-    fn query_remote_profiles<'a>(
+    fn query_deployed_profiles<'a>(
         &self,
-        _profiles: &'a Profiles,
+        profiles: &'a Profiles,
     ) -> eyre::Result<Vec<Vec<(&'a ProfileInfo, QueryResult)>>> {
-        todo!("query remote profiles")
+        // The main bottleneck here is network latency.
+        // Start all connections immediately before waiting for
+
+        let mut jobs = Vec::with_capacity(profiles.nodes().len());
+        for node in profiles.nodes() {
+            let mut node_jobs = Vec::with_capacity(node.profiles().len());
+            for profile in node.profiles() {
+                let span = tracing::error_span!(
+                    "query_deployed_profile",
+                    node = profile.node,
+                    profile = profile.profile,
+                );
+                let job = span.in_scope(|| Self::spawn_query_job(profile))?;
+                node_jobs.push((profile, span, job));
+            }
+            jobs.push(node_jobs);
+        }
+
+        let mut results = Vec::with_capacity(jobs.len());
+        for node in jobs {
+            let mut node_results = Vec::with_capacity(node.len());
+            for (profile, span, job) in node.into_iter() {
+                let result = span.in_scope(|| Self::resolve_query_job(job))?;
+                node_results.push((profile, result));
+            }
+            results.push(node_results);
+        }
+
+        Ok(results)
+    }
+
+    fn spawn_query_job(profile: &ProfileInfo) -> eyre::Result<CmdChild> {
+        const CHECK_PROFILE_SCRIPT: &str = "\
+            if [ -L \"$1\" ]; then \
+                deployed=$(realpath \"$1\"); \
+                if [ \"$1\" = /nix/var/nix/profiles/system ]; then \
+                    inner=$(dirname \"$(realpath \"$deployed/activate\")\"); \
+                    active=$(realpath /run/current-system); \
+                    if [ \"$inner\" = \"$active\" ]; then \
+                        printf \"valid;%s\" \"$deployed\"; \
+                    else \
+                        printf \"needs reboot;%s\" \"$deployed\"; \
+                    fi \
+                else \
+                    printf \"valid;%s\" \"$deployed\"; \
+                fi \
+            elif [ -e \"$1\" ]; then \
+                printf \"invalid;\"; \
+            else \
+                printf \"missing;\"; \
+            fi\
+        ";
+
+        // ssh runs the given command by concatenating arguments with spaces
+        // and running that in a shell,
+        // so we need to take care of quoting ourselves.
+        let quote = |arg: &str| format!("'{}'", arg.replace('\'', "'\\''"));
+
+        let mut cmd = Command::new("ssh");
+        cmd.args(["-T", "-o", "ConnectTimeout=3"]);
+        cmd.args(&profile.ssh_opts);
+        cmd.args(["-o", &format!("User={}", profile.ssh_user)]);
+        cmd.args([
+            &profile.hostname,
+            "--",
+            "/bin/sh",
+            "-c",
+            &quote(CHECK_PROFILE_SCRIPT),
+            "sh",
+            &quote(&profile.profile_path),
+        ]);
+
+        command::spawn_piped(cmd).map_err(|err| err.into_eyre())
+    }
+
+    fn resolve_query_job(job: CmdChild) -> eyre::Result<QueryResult> {
+        let output = match job.wait_with_output() {
+            Ok(output) => {
+                let stderr = String::from_utf8_lossy(output.stderr());
+                if !stderr.is_empty() {
+                    tracing::warn!(
+                        "ssh emitted warnings:\n  Captured stderr:\n{}",
+                        display::indent(4, &stderr),
+                    );
+                }
+                output.string().map_err(|error| error.into_eyre())?
+            }
+            Err(error) if error.is_exit_code_error() => {
+                let stderr = String::from_utf8_lossy(error.stderr().unwrap_or(&[]));
+                if stderr.is_empty() {
+                    tracing::warn!("ssh failed:\n  Captured stderr is empty");
+                } else {
+                    tracing::warn!(
+                        "ssh failed:\n  Captured stderr:\n{}",
+                        display::indent(4, &stderr),
+                    );
+                }
+                return Ok(QueryResult::Unknown);
+            }
+            Err(error) => return Err(error.into_eyre()),
+        };
+
+        QueryResult::parse(&output).ok_or_else(|| {
+            if output.is_empty() {
+                eyre::eyre!("external program ssh did not produce any output")
+            } else {
+                eyre::eyre!("external program ssh produced unexpected output")
+                    .section(output.header("Captured stdout:"))
+            }
+        })
     }
 
     fn eval_local_profiles<'a>(
@@ -104,7 +216,6 @@ impl StatusArgs {
 
 type EvalResult<'a> = (&'a ProfileInfo, QueryResult, Option<String>);
 
-#[allow(dead_code)] // TODO: remove
 #[derive(Debug)]
 enum QueryResult {
     Valid {
@@ -114,6 +225,28 @@ enum QueryResult {
     Invalid,
     Missing,
     Unknown,
+}
+
+impl QueryResult {
+    fn parse(s: &str) -> Option<Self> {
+        if let Some(deployed_path) = s.strip_prefix("valid;") {
+            Some(Self::Valid {
+                deployed_path: deployed_path.to_owned(),
+                needs_reboot: false,
+            })
+        } else if let Some(deployed_path) = s.strip_prefix("needs reboot;") {
+            Some(Self::Valid {
+                deployed_path: deployed_path.to_owned(),
+                needs_reboot: true,
+            })
+        } else if s == "invalid;" {
+            Some(Self::Invalid)
+        } else if s == "missing;" {
+            Some(Self::Missing)
+        } else {
+            None
+        }
+    }
 }
 
 #[derive(Debug)]

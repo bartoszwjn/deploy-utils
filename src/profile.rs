@@ -303,7 +303,9 @@ fn eval_deploy(flake: &str) -> eyre::Result<Deploy> {
         "--",
         &format!("{flake}#.deploy"),
     ]);
-    command::output_json(cmd).map_err(|e| e.into_eyre())
+    command::output(cmd)
+        .and_then(|output| output.json())
+        .map_err(|e| e.into_eyre())
 }
 
 fn combine_generic_options(

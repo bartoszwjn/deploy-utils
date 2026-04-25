@@ -76,3 +76,17 @@ fn display_command_arg(arg: &str) -> impl fmt::Display {
         }
     })
 }
+
+pub(crate) fn indent(amount: usize, s: &str) -> impl fmt::Display {
+    fmt::from_fn(move |f| {
+        let mut lines = s.lines().peekable();
+        while let Some(line) = lines.next() {
+            if lines.peek().is_some() {
+                writeln!(f, "{:amount$}{line}", "")?;
+            } else {
+                write!(f, "{:amount$}{line}", "")?;
+            }
+        }
+        Ok(())
+    })
+}
