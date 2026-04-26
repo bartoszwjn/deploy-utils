@@ -19,17 +19,27 @@ fn main() -> ExitCode {
 }
 
 fn exec() -> eyre::Result<()> {
-    color_eyre::config::HookBuilder::default()
-        .display_env_section(false)
-        .display_location_section(false)
-        .capture_span_trace_by_default(false)
-        .install()?;
-
     let app = DeployUtilsApp::parse();
 
+    init_eyre()?;
     init_tracing(app.default_log_level());
 
     app.exec()
+}
+
+fn init_eyre() -> eyre::Result<()> {
+    let (panic_hook, eyre_hook) = color_eyre::config::HookBuilder::default()
+        .display_env_section(false)
+        .display_location_section(false)
+        .capture_span_trace_by_default(false)
+        .try_into_hooks()?;
+
+    eyre_hook.install()?;
+    std::panic::set_hook(Box::new(move |panic_info| {
+        anstream::eprintln!("{}", panic_hook.panic_report(panic_info))
+    }));
+
+    Ok(())
 }
 
 fn init_tracing(default_level: tracing::Level) {
