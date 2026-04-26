@@ -39,12 +39,12 @@ pub(super) struct StatusArgs {
 impl StatusArgs {
     pub(super) fn exec(self) -> eyre::Result<()> {
         let profiles = Profiles::eval(&self.flake)?.select(self.nodes.as_deref())?;
-        anstream::eprintln!("{}", profiles.display());
+        anstream::println!("{}", profiles.display());
 
         let with_remote = self.query_deployed_profiles(&profiles)?;
         let results = self.eval_local_profiles(with_remote)?;
 
-        anstream::eprintln!("{}", self.display_results(&results));
+        anstream::println!("{}", self.display_results(&results));
 
         Ok(())
     }

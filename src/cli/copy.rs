@@ -33,7 +33,7 @@ pub(super) struct CopyArgs {
 impl CopyArgs {
     pub(super) fn exec(self) -> eyre::Result<()> {
         let profiles = Profiles::eval(&self.flake)?.select(self.nodes.as_deref())?;
-        anstream::eprintln!("{}", profiles.display());
+        anstream::println!("{}", profiles.display());
 
         let nodes = profiles.nodes();
         let mut results = Vec::with_capacity(nodes.len());
@@ -47,7 +47,7 @@ impl CopyArgs {
             results.push(node_results);
         }
 
-        anstream::eprintln!("{}", self.display_results(&results));
+        anstream::println!("{}", self.display_results(&results));
 
         Ok(())
     }
