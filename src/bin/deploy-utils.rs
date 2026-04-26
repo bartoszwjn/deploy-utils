@@ -3,7 +3,11 @@ use std::process::ExitCode;
 use anstream::AutoStream;
 use anstyle::{AnsiColor, Style};
 use clap::Parser;
-use tracing_subscriber::{filter::EnvFilter, layer::SubscriberExt, util::SubscriberInitExt};
+use tracing_subscriber::{
+    filter::EnvFilter,
+    layer::{Layer, SubscriberExt},
+    util::SubscriberInitExt,
+};
 
 use deploy_utils::DeployUtilsApp;
 
@@ -48,9 +52,19 @@ fn init_tracing(default_level: tracing::Level) {
         .from_env_lossy();
 
     let color_choice = AutoStream::choice(&std::io::stderr());
+    let show_time = tracing::Level::TRACE <= default_level;
+    let show_target = tracing::Level::DEBUG <= default_level;
 
-    let fmt = tracing_subscriber::fmt::layer()
-        .with_writer(move || AutoStream::new(std::io::stderr().lock(), color_choice));
+    let fmt = {
+        let base = tracing_subscriber::fmt::layer()
+            .with_target(show_target)
+            .with_writer(move || AutoStream::new(std::io::stderr().lock(), color_choice));
+        if show_time {
+            base.boxed()
+        } else {
+            base.without_time().boxed()
+        }
+    };
 
     tracing_subscriber::registry()
         .with(fmt)
