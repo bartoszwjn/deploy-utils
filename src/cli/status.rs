@@ -24,7 +24,7 @@ pub(super) struct StatusArgs {
     ///
     /// Zero means "as many as there are available threads",
     /// a negative number `-N` means "`N` fewer than the number of available threads".
-    #[arg(long, default_value_t = 0)]
+    #[arg(long, short = 'j', default_value_t = 0)]
     eval_jobs: isize,
 
     /// Evaluate all store paths with a single invocation of Nix.
@@ -32,7 +32,7 @@ pub(super) struct StatusArgs {
     single_eval: bool,
 
     /// Include profile store paths in the output.
-    #[arg(long)]
+    #[arg(long, short = 's')]
     show_paths: bool,
 }
 
