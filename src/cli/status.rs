@@ -3,6 +3,8 @@
 use std::{fmt, process::Command};
 
 use color_eyre::{Section, SectionExt};
+use eyre::WrapErr;
+use rayon::iter::{IntoParallelIterator, ParallelIterator};
 
 use crate::{
     command::{self, CmdChild},
@@ -27,10 +29,6 @@ pub(super) struct StatusArgs {
     #[arg(long, short = 'j', default_value_t = 0)]
     eval_jobs: isize,
 
-    /// Evaluate all store paths with a single invocation of Nix.
-    #[arg(long, conflicts_with("eval_jobs"))]
-    single_eval: bool,
-
     /// Include profile store paths in the output.
     #[arg(long, short = 's')]
     show_paths: bool,
@@ -53,6 +51,8 @@ impl StatusArgs {
         &self,
         profiles: &'a Profiles,
     ) -> eyre::Result<Vec<Vec<(&'a ProfileInfo, QueryResult)>>> {
+        tracing::info!("querying deployed profile paths");
+
         // The main bottleneck here is network latency.
         // Start all connections immediately before waiting for
 
@@ -143,9 +143,9 @@ impl StatusArgs {
             Err(error) if error.is_exit_code_error() => {
                 let stderr = String::from_utf8_lossy(error.stderr().unwrap_or(&[]));
                 if stderr.is_empty() {
-                    tracing::warn!("ssh failed:\n  Captured stderr is empty");
+                    tracing::error!("ssh failed:\n  Captured stderr is empty");
                 } else {
-                    tracing::warn!(
+                    tracing::error!(
                         "ssh failed:\n  Captured stderr:\n{}",
                         display::indent(4, &stderr),
                     );
@@ -167,9 +167,94 @@ impl StatusArgs {
 
     fn eval_local_profiles<'a>(
         &self,
-        _with_remote: Vec<Vec<(&'a ProfileInfo, QueryResult)>>,
+        profiles: Vec<Vec<(&'a ProfileInfo, QueryResult)>>,
     ) -> eyre::Result<Vec<Vec<EvalResult<'a>>>> {
-        todo!("evaluate local profiles")
+        tracing::info!("evaluating local profile paths");
+
+        self.build_thread_pool()?.install(|| {
+            profiles
+                .into_par_iter()
+                .map(|node| {
+                    node.into_par_iter()
+                        .map(|(profile, query_result)| {
+                            let local_path = self.eval_local_profile(profile, &query_result)?;
+                            Ok((profile, query_result, local_path))
+                        })
+                        .collect()
+                })
+                .collect()
+        })
+    }
+
+    fn build_thread_pool(&self) -> eyre::Result<rayon::ThreadPool> {
+        let num_threads: usize = match self.eval_jobs {
+            positive @ 1_isize.. => positive as usize,
+            below_zero @ ..=0 => {
+                let available = match std::thread::available_parallelism() {
+                    Ok(non_zero) => non_zero.get(),
+                    Err(error) => {
+                        tracing::warn!(
+                            error = &error as &(dyn std::error::Error + Send + Sync),
+                            "failed to query the number of available threads, using 1 thread",
+                        );
+                        1
+                    }
+                };
+                available.saturating_add_signed(below_zero).max(1)
+            }
+        };
+
+        assert!(0 < num_threads);
+        tracing::debug!(num_threads, "starting thread pool");
+        rayon::ThreadPoolBuilder::new()
+            .num_threads(num_threads)
+            .build()
+            .wrap_err("thread pool creation failed")
+    }
+
+    #[tracing::instrument(
+        level = "error",
+        skip_all,
+        fields(node = profile.node, profile = profile.profile),
+    )]
+    fn eval_local_profile(
+        &self,
+        profile: &ProfileInfo,
+        query_result: &QueryResult,
+    ) -> eyre::Result<Option<String>> {
+        if !(matches!(query_result, QueryResult::Valid { .. }) || self.show_paths) {
+            tracing::debug!("skipping local path evaluation");
+            return Ok(None);
+        }
+
+        let mut cmd = Command::new("nix");
+        cmd.args(["eval", "--json", "--"]);
+        cmd.arg(format!(
+            // TODO: find a way to properly escape node and profile name
+            "{}#.deploy.nodes.{}.profiles.{}.path.outPath",
+            self.flake, profile.node, profile.profile
+        ));
+
+        match command::output(cmd).and_then(|o| o.json::<String>()) {
+            Ok(local_path) => Ok(Some(local_path)),
+            Err(error) if error.is_exit_code_error() => {
+                let stderr = String::from_utf8_lossy(error.stderr().unwrap_or(&[]));
+                if stderr.is_empty() {
+                    tracing::error!("nix eval failed:\n  Captured stderr is empty");
+                } else {
+                    tracing::error!(
+                        "nix eval failed:\n  Catpured stderr:\n{}",
+                        display::indent(4, &stderr),
+                    );
+                }
+                Ok(None)
+            }
+            Err(error) if error.is_json_error() => {
+                tracing::error!(error = &error as &(dyn std::error::Error + Send + Sync));
+                Ok(None)
+            }
+            Err(error) => Err(error.into_eyre()),
+        }
     }
 
     fn display_results(&self, results: &[Vec<EvalResult<'_>>]) -> impl fmt::Display {

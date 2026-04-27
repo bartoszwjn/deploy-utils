@@ -178,6 +178,17 @@ impl CmdError {
         }
     }
 
+    pub(crate) fn is_json_error(&self) -> bool {
+        match self.kind {
+            CmdErrorKind::Spawn(_) => false,
+            CmdErrorKind::Wait(_) => false,
+            CmdErrorKind::ExitCodeStatus(_) => false,
+            CmdErrorKind::ExitCodeOutput(_) => false,
+            CmdErrorKind::Utf8(_, _) => false,
+            CmdErrorKind::Json(_, _) => true,
+        }
+    }
+
     pub(crate) fn stderr(&self) -> Option<&[u8]> {
         self.output().map(|output| output.stderr.as_slice())
     }
