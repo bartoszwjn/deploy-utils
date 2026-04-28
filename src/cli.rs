@@ -1,9 +1,9 @@
 //! Command-line interface.
 
-use copy::CopyArgs;
+use push::PushArgs;
 use status::StatusArgs;
 
-mod copy;
+mod push;
 mod status;
 
 /// Utilities for working with `deploy-rs`
@@ -18,13 +18,13 @@ pub struct DeployUtilsApp {
 }
 
 #[derive(Debug, clap::Subcommand)]
-#[command(next_help_heading = "Logging options")]
 enum Subcommand {
-    Copy(CopyArgs),
+    Push(PushArgs),
     Status(StatusArgs),
 }
 
 #[derive(clap::Args, Debug)]
+#[command(next_help_heading = "Logging options")]
 struct LoggingOptions {
     /// Be less verbose.
     #[arg(long, short = 'q', action = clap::ArgAction::Count, global = true)]
@@ -38,7 +38,7 @@ struct LoggingOptions {
 impl DeployUtilsApp {
     pub fn exec(self) -> eyre::Result<()> {
         match self.subcommand {
-            Subcommand::Copy(copy_args) => copy_args.exec(),
+            Subcommand::Push(push_args) => push_args.exec(),
             Subcommand::Status(status_args) => status_args.exec(),
         }
     }

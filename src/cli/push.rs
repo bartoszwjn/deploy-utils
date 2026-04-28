@@ -1,4 +1,4 @@
-//! `copy` subcommand.
+//! `push` subcommand.
 
 use std::{fmt, process::Command};
 
@@ -9,7 +9,7 @@ use crate::{
 
 /// Copy profile closures to their respective nodes without deploying them.
 #[derive(clap::Args, Debug)]
-pub(super) struct CopyArgs {
+pub(super) struct PushArgs {
     /// Copy profiles from the given node(s) only.
     nodes: Option<Vec<String>>,
 
@@ -30,7 +30,7 @@ pub(super) struct CopyArgs {
     no_substitute_on_destination: bool,
 }
 
-impl CopyArgs {
+impl PushArgs {
     pub(super) fn exec(self) -> eyre::Result<()> {
         let profiles = Profiles::eval(&self.flake)?.select(self.nodes.as_deref())?;
         anstream::println!("{}", profiles.display());
@@ -41,7 +41,7 @@ impl CopyArgs {
             let profiles = node.profiles();
             let mut node_results = Vec::with_capacity(profiles.len());
             for profile in profiles {
-                let status = self.copy_closure(profile)?;
+                let status = self.push_closure(profile)?;
                 node_results.push((profile, status));
             }
             results.push(node_results);
@@ -52,7 +52,7 @@ impl CopyArgs {
         Ok(())
     }
 
-    fn copy_closure(&self, profile: &ProfileInfo) -> eyre::Result<CopyStatus> {
+    fn push_closure(&self, profile: &ProfileInfo) -> eyre::Result<PushStatus> {
         tracing::info!(
             node = profile.node,
             profile = profile.profile,
@@ -88,13 +88,13 @@ impl CopyArgs {
         cmd.env("NIX_SSHOPTS", profile.get_nix_sshopts());
 
         match command::run(cmd) {
-            Ok(()) => Ok(CopyStatus::Success),
-            Err(error) if error.is_exit_code_error() => Ok(CopyStatus::Failure),
+            Ok(()) => Ok(PushStatus::Success),
+            Err(error) if error.is_exit_code_error() => Ok(PushStatus::Failure),
             Err(error) => Err(error.into_eyre()),
         }
     }
 
-    fn display_results(&self, results: &[Vec<(&ProfileInfo, CopyStatus)>]) -> impl fmt::Display {
+    fn display_results(&self, results: &[Vec<(&ProfileInfo, PushStatus)>]) -> impl fmt::Display {
         use display::styles::{HEADER, NODE, PROFILE};
 
         let node_width = display::get_max_width(
@@ -111,7 +111,7 @@ impl CopyArgs {
         );
 
         fmt::from_fn(move |f| {
-            writeln!(f, "{HEADER}Copy results:{HEADER:#}")?;
+            writeln!(f, "{HEADER}Push results:{HEADER:#}")?;
             for node in results {
                 let mut first = true;
                 for (profile, status) in node {
@@ -134,18 +134,18 @@ impl CopyArgs {
 }
 
 #[derive(Debug)]
-enum CopyStatus {
+enum PushStatus {
     Success,
     Failure,
 }
 
-impl fmt::Display for CopyStatus {
+impl fmt::Display for PushStatus {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         use display::styles::{FAILURE, SUCCESS};
 
         match self {
-            CopyStatus::Success => write!(f, "{SUCCESS}success{SUCCESS:#}"),
-            CopyStatus::Failure => write!(f, "{FAILURE}failure{FAILURE:#}"),
+            Self::Success => write!(f, "{SUCCESS}success{SUCCESS:#}"),
+            Self::Failure => write!(f, "{FAILURE}failure{FAILURE:#}"),
         }
     }
 }
