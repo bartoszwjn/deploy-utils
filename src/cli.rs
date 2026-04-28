@@ -24,6 +24,53 @@ enum Subcommand {
 }
 
 #[derive(clap::Args, Debug)]
+#[command(next_help_heading = "Profile option overrides")]
+pub(crate) struct ProfileOptionOverrides {
+    /// Override each profile's `hostname` with the given value.
+    #[arg(long)]
+    pub(crate) hostname: Option<String>,
+
+    /// Override each profile's `user` with the given value.
+    #[arg(long)]
+    pub(crate) profile_user: Option<String>,
+
+    /// Override each profile's `sshUser` with the given value.
+    #[arg(long)]
+    pub(crate) ssh_user: Option<String>,
+
+    /// Override each profile's `sshOpts` with the given value(s).
+    ///
+    /// Note on parsing: after encountering `--ssh-opts` all further arguments will be treated
+    /// as values for this option, until an optional end marker value `;` is encountered.
+    ///
+    /// Examples of mixing `--ssh-opts` with other options (all of these are equivalent):
+    ///
+    ///     # specify `--ssh-opts` last
+    ///     <subcommand> --hostname foo --ssh-opts -p 22
+    ///
+    ///     # use the `;` end marker
+    ///     <subcommand> --ssh-opts -p 22 ";" --hostname foo
+    ///
+    ///     # add one value at a time with `--ssh-opts=`
+    ///     <subcommand> --ssh-opts=-p --ssh-opts=22 --hostname foo
+    ///
+    /// In most shells the `;` argument will need to be surrounded with quotes in order to avoid
+    /// being interpreted by the shell as an end-of-command marker.
+    #[arg(
+        long,
+        num_args = 0..,
+        allow_hyphen_values = true,
+        value_terminator = ";",
+        verbatim_doc_comment,
+    )]
+    pub(crate) ssh_opts: Option<Vec<String>>,
+
+    /// Override each profile's `fastConnection` with the given value.
+    #[arg(long)]
+    pub(crate) fast_connection: Option<bool>,
+}
+
+#[derive(clap::Args, Debug)]
 #[command(next_help_heading = "Logging options")]
 struct LoggingOptions {
     /// Be less verbose.

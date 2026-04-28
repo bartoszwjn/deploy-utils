@@ -12,6 +12,8 @@ use crate::{
     profile::{ProfileInfo, Profiles},
 };
 
+use super::ProfileOptionOverrides;
+
 /// Compare deployed profiles with local configuration.
 #[derive(clap::Args, Debug)]
 pub(super) struct StatusArgs {
@@ -36,11 +38,15 @@ pub(super) struct StatusArgs {
     /// Include profile store paths in the output.
     #[arg(long, short = 's')]
     show_paths: bool,
+
+    #[command(flatten)]
+    overrides: ProfileOptionOverrides,
 }
 
 impl StatusArgs {
     pub(super) fn exec(self) -> eyre::Result<()> {
-        let profiles = Profiles::eval(&self.flake)?.select(self.nodes.as_deref())?;
+        let profiles =
+            Profiles::eval(&self.flake, &self.overrides)?.select(self.nodes.as_deref())?;
         anstream::println!("{}", profiles.display());
 
         let with_remote = self.query_deployed_profiles(&profiles)?;

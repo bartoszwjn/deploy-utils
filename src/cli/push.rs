@@ -7,6 +7,8 @@ use crate::{
     profile::{ProfileInfo, Profiles},
 };
 
+use super::ProfileOptionOverrides;
+
 /// `nix copy` all profile closures to their respective nodes without deploying them.
 #[derive(clap::Args, Debug)]
 pub(super) struct PushArgs {
@@ -20,22 +22,14 @@ pub(super) struct PushArgs {
     #[arg(long, default_value = ".")]
     flake: String,
 
-    /// Try substitutes on the destination node.
-    ///
-    /// The default is to follow each profile's `fastConnection` option.
-    #[arg(long, short = 's')]
-    substitute_on_destination: bool,
-
-    /// Do not try substitutes on the destination node.
-    ///
-    /// The default is to follow each profile's `fastConnection` option.
-    #[arg(long, short = 'S', conflicts_with = "substitute_on_destination")]
-    no_substitute_on_destination: bool,
+    #[command(flatten)]
+    overrides: ProfileOptionOverrides,
 }
 
 impl PushArgs {
     pub(super) fn exec(self) -> eyre::Result<()> {
-        let profiles = Profiles::eval(&self.flake)?.select(self.nodes.as_deref())?;
+        let profiles =
+            Profiles::eval(&self.flake, &self.overrides)?.select(self.nodes.as_deref())?;
         anstream::println!("{}", profiles.display());
 
         let nodes = profiles.nodes();
@@ -62,20 +56,9 @@ impl PushArgs {
             "copying profile closure",
         );
 
-        let substitute_on_destination = match (
-            self.substitute_on_destination,
-            self.no_substitute_on_destination,
-            profile.fast_connection,
-        ) {
-            (true, false, _) => true,
-            (false, true, _) => false,
-            (true, true, _) => unreachable!("flags are mutually exclusive"),
-            (false, false, is_fast) => !is_fast,
-        };
-
         let mut cmd = Command::new("nix");
         cmd.arg("copy");
-        if substitute_on_destination {
+        if !profile.fast_connection {
             cmd.arg("--substitute-on-destination");
         }
         cmd.args([

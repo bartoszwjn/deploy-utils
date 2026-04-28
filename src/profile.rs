@@ -9,7 +9,7 @@ use std::{
 use color_eyre::Section;
 use eyre::WrapErr;
 
-use crate::{command, display, natural_sort::NaturalString};
+use crate::{cli::ProfileOptionOverrides, command, display, natural_sort::NaturalString};
 
 #[derive(Debug)]
 pub(crate) struct Profiles {
@@ -34,7 +34,7 @@ pub(crate) struct ProfileInfo {
 }
 
 impl Profiles {
-    pub(crate) fn eval(flake: &str) -> eyre::Result<Self> {
+    pub(crate) fn eval(flake: &str, overrides: &ProfileOptionOverrides) -> eyre::Result<Self> {
         tracing::debug!(flake, "evaluating deploy profiles");
 
         let mut deploy = eval_deploy(flake)?;
@@ -46,8 +46,14 @@ impl Profiles {
         for (node_name, mut node) in std::mem::take(&mut deploy.nodes) {
             let mut profiles = BTreeMap::new();
             for (profile_name, profile) in std::mem::take(&mut node.profiles) {
-                let profile_info =
-                    ProfileInfo::make(&node_name, &profile_name, &deploy, &node, profile)?;
+                let profile_info = ProfileInfo::make(
+                    &node_name,
+                    &profile_name,
+                    &deploy,
+                    &node,
+                    profile,
+                    overrides,
+                )?;
                 profiles.insert(NaturalString::owned(profile_name), profile_info);
             }
             nodes.insert(NaturalString::owned(node_name), NodeInfo { profiles });
@@ -143,10 +149,12 @@ impl ProfileInfo {
         deploy: &Deploy,
         node: &Node,
         profile: Profile,
+        overrides: &ProfileOptionOverrides,
     ) -> eyre::Result<Self> {
         let generic_opts =
-            combine_generic_options(&deploy.generic, &node.generic, &profile.generic);
+            combine_generic_options(&deploy.generic, &node.generic, &profile.generic, overrides);
 
+        let hostname = (overrides.hostname.clone()).unwrap_or_else(|| node.hostname.clone());
         let user = (generic_opts.user)
             .or_else(|| generic_opts.ssh_user.clone())
             .ok_or_else(|| {
@@ -188,7 +196,7 @@ impl ProfileInfo {
         Ok(Self {
             node: node_name.to_owned(),
             profile: profile_name.to_owned(),
-            hostname: node.hostname.clone(),
+            hostname,
             profile_path,
             ssh_user,
             ssh_opts,
@@ -312,22 +320,28 @@ fn combine_generic_options(
     deploy: &GenericOptions,
     node: &GenericOptions,
     profile: &GenericOptions,
+    overrides: &ProfileOptionOverrides,
 ) -> GenericOptions {
-    let ssh_user = (profile.ssh_user.clone())
+    let ssh_user = (overrides.ssh_user.clone())
+        .or_else(|| profile.ssh_user.clone())
         .or_else(|| node.ssh_user.clone())
         .or_else(|| deploy.ssh_user.clone());
 
-    let ssh_opts = (deploy.ssh_opts.iter())
-        .chain(node.ssh_opts.iter())
-        .chain(profile.ssh_opts.iter())
-        .cloned()
-        .collect();
+    let ssh_opts = (overrides.ssh_opts.clone()).unwrap_or_else(|| {
+        (deploy.ssh_opts.iter())
+            .chain(node.ssh_opts.iter())
+            .chain(profile.ssh_opts.iter())
+            .cloned()
+            .collect()
+    });
 
-    let user = (profile.user.clone())
+    let user = (overrides.profile_user.clone())
+        .or_else(|| profile.user.clone())
         .or_else(|| node.user.clone())
         .or_else(|| deploy.user.clone());
 
-    let fast_connection = (profile.fast_connection)
+    let fast_connection = (overrides.fast_connection)
+        .or(profile.fast_connection)
         .or(node.fast_connection)
         .or(deploy.fast_connection);
 
