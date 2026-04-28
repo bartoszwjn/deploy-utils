@@ -1,5 +1,5 @@
 {
-  description = "Additional utilities for working with deploy-rs";
+  description = "Utilities for working with deploy-rs";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";

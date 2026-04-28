@@ -2,7 +2,7 @@
 name = "deploy-utils"
 version = "0.0.0"
 edition = "2024"
-description = "Additional utilities for working with deploy-rs"
+description = "Utilities for working with deploy-rs"
 readme = "README.md"
 repository = "https://github.com/bartoszwjn/deploy-utils"
 license = "MIT OR Apache-2.0"
