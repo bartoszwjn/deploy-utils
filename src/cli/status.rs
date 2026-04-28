@@ -12,10 +12,13 @@ use crate::{
     profile::{ProfileInfo, Profiles},
 };
 
-/// Check if deployed profiles match local configuration.
+/// Compare deployed profiles with local configuration.
 #[derive(clap::Args, Debug)]
 pub(super) struct StatusArgs {
-    /// Check profiles from the given node(s) only.
+    /// Compare profiles from given node(s) only.
+    ///
+    /// The default is to compare all profiles.
+    /// When at least one node name is specified, only profiles from these nodes are compared.
     nodes: Option<Vec<String>>,
 
     /// The flake to use as a source of profiles.
@@ -24,8 +27,9 @@ pub(super) struct StatusArgs {
 
     /// Number of Nix evaluations to perform in parallel.
     ///
-    /// Zero means "as many as there are available threads",
-    /// a negative number `-N` means "`N` fewer than the number of available threads".
+    /// When set to zero (the default), the number of CPUs in the system will be used.
+    ///
+    /// When set to a negative number `-N`, the number of CPUs minus `N` will be used.
     #[arg(long, short = 'j', default_value_t = 0)]
     eval_jobs: isize,
 
@@ -53,8 +57,7 @@ impl StatusArgs {
     ) -> eyre::Result<Vec<Vec<(&'a ProfileInfo, QueryResult)>>> {
         tracing::info!("querying deployed profile paths");
 
-        // The main bottleneck here is network latency.
-        // Start all connections immediately before waiting for
+        // The main bottleneck here is network latency, run all queries in parallel.
 
         let mut jobs = Vec::with_capacity(profiles.nodes().len());
         for node in profiles.nodes() {

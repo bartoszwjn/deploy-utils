@@ -7,10 +7,13 @@ use crate::{
     profile::{ProfileInfo, Profiles},
 };
 
-/// Copy profile closures to their respective nodes without deploying them.
+/// `nix copy` all profile closures to their respective nodes without deploying them.
 #[derive(clap::Args, Debug)]
 pub(super) struct PushArgs {
-    /// Copy profiles from the given node(s) only.
+    /// Push profiles to given node(s) only.
+    ///
+    /// The default is to push all profiles.
+    /// When at least one node name is specified, only profiles from these nodes are pushed.
     nodes: Option<Vec<String>>,
 
     /// The flake to use as a source of profiles.

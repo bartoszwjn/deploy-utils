@@ -27,10 +27,18 @@ enum Subcommand {
 #[command(next_help_heading = "Logging options")]
 struct LoggingOptions {
     /// Be less verbose.
+    ///
+    /// Can be specified multiple times, with each instance further reducing log verbosity.
+    ///
+    /// Each instance of `--quiet` cancels out one instance of `--verbose` and vice versa.
     #[arg(long, short = 'q', action = clap::ArgAction::Count, global = true)]
     quiet: u8,
 
     /// Be more verbose.
+    ///
+    /// Can be specified multiple times, with each instance further increasing log verbosity.
+    ///
+    /// Each instance of `--verbose` cancels out one instance of `--quiet` and vice versa.
     #[arg(long, short = 'v', action = clap::ArgAction::Count, global = true)]
     verbose: u8,
 }
