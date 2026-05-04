@@ -27,6 +27,7 @@
       system:
       let
         pkgs = inputs.nixpkgs.legacyPackages.${system};
+
         craneLib = import inputs.crane { inherit pkgs; };
 
         treefmtEval = (import inputs.treefmt-nix).evalModule pkgs {
@@ -37,16 +38,17 @@
           programs.rustfmt.enable = true;
         };
 
-        deploy-utils = import ./package.nix { inherit lib craneLib; };
+        packageName = "deploy-utils";
+        package = pkgs.callPackage ./package.nix { inherit craneLib; };
       in
       {
         packages = {
-          inherit deploy-utils;
-          default = deploy-utils;
+          default = package;
+          ${packageName} = package;
         };
 
         checks = {
-          inherit deploy-utils;
+          ${packageName} = package;
           treefmt-check = treefmtEval.config.build.check (
             lib.fileset.toSource {
               root = ./.;
@@ -54,11 +56,11 @@
             }
           );
         }
-        // lib.mapAttrs' (testName: lib.nameValuePair "deploy-utils-${testName}") deploy-utils.tests;
+        // lib.mapAttrs' (testName: lib.nameValuePair "${packageName}-${testName}") package.tests;
 
         devShells.default = craneLib.devShell {
           inputsFrom = [
-            deploy-utils
+            package
             treefmtEval.config.build.devShell
           ];
         };
