@@ -45,14 +45,17 @@ pub(crate) struct ProfileOptionOverrides {
     ///
     /// Examples of mixing `--ssh-opts` with other options (all of these are equivalent):
     ///
-    ///     # specify `--ssh-opts` last
-    ///     <subcommand> --hostname foo --ssh-opts -p 22
+    /// - Specify `--ssh-opts` last:
     ///
-    ///     # use the `;` end marker
-    ///     <subcommand> --ssh-opts -p 22 ";" --hostname foo
+    ///   `<subcommand> --hostname foo --ssh-opts -p 22`
     ///
-    ///     # add one value at a time with `--ssh-opts=`
-    ///     <subcommand> --ssh-opts=-p --ssh-opts=22 --hostname foo
+    /// - Use the `;` end marker:
+    ///
+    ///   `<subcommand> --ssh-opts -p 22 ";" --hostname foo`
+    ///
+    /// - Add one value at a time with `--ssh-opts=`:
+    ///
+    ///   `<subcommand> --ssh-opts=-p --ssh-opts=22 --hostname foo`
     ///
     /// In most shells the `;` argument will need to be surrounded with quotes in order to avoid
     /// being interpreted by the shell as an end-of-command marker.
