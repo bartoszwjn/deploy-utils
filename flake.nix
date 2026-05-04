@@ -5,6 +5,10 @@
     nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
     systems.url = "github:nix-systems/default";
     crane.url = "github:ipetkov/crane";
+    rust-overlay = {
+      url = "github:oxalica/rust-overlay";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
     treefmt-nix = {
       url = "github:numtide/treefmt-nix";
       inputs.nixpkgs.follows = "nixpkgs";
@@ -28,7 +32,13 @@
       let
         pkgs = inputs.nixpkgs.legacyPackages.${system};
 
-        craneLib = import inputs.crane { inherit pkgs; };
+        craneLib = (import inputs.crane { inherit pkgs; }).overrideToolchain (
+          pkgs':
+          let
+            rust-bin = inputs.rust-overlay.lib.mkRustBin { } pkgs';
+          in
+          rust-bin.fromRustupToolchainFile ./rust-toolchain.toml
+        );
 
         treefmtEval = (import inputs.treefmt-nix).evalModule pkgs {
           projectRootFile = "flake.nix";
