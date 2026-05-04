@@ -24,4 +24,4 @@ tracing = "0.1.44"
 tracing-error = "0.2.1"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 unicode-width = { version = "0.2.2", default-features = false }
-whoami = "2.1.1"
+whoami = "2.1.2"
