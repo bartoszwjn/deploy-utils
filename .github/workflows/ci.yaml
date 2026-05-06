@@ -12,8 +12,11 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  nix-flake-check:
-    name: nix flake check - ${{ matrix.os }}
+  nix-checks:
+    name: Nix checks - ${{ matrix.os }}
+    permissions:
+      contents: read
+      actions: write # Needed for purging Nix cache
     timeout-minutes: 15
     strategy:
       fail-fast: false
@@ -25,10 +28,44 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - name: Install Nix
-        uses: samueldr/lix-gha-installer-action@f5e94192f565f53d84f41a056956dc0d3183b343 # 2026-04-08
+        uses: cachix/install-nix-action@8aa03977d8d733052d78f4e008a241fd1dbf36b3 # v31.10.6
         with:
           extra_nix_config: |
             allow-import-from-derivation = false
+            keep-derivations = true
+            keep-outputs = true
 
-      - name: Run nix flake check
-        run: nix flake check --no-update-lock-file --keep-going --print-build-logs
+      - name: Cache Nix store
+        uses: nix-community/cache-nix-action@7df957e333c1e5da7721f60227dbba6d06080569 # v7.0.2
+        with:
+          primary-key: nix-${{ runner.os }}-${{ hashFiles('flake.lock', 'rust-toolchain.toml') }}-${{ hashFiles('Cargo.lock') }}
+          restore-prefixes-first-match: |
+            nix-${{ runner.os }}-${{ hashFiles('flake.lock', 'rust-toolchain.toml') }}-
+            nix-${{ runner.os }}-
+          gc-max-store-size: 0
+          purge: true
+          purge-primary-key: never
+          purge-prefixes: nix-${{ runner.os }}-
+          purge-last-accessed: P2D
+
+      - name: Run nix checks
+        shell: bash -euo pipefail {0}
+        run: |
+          # Build all check outputs of the flake, just like `nix flake check`,
+          # but also create gc roots.
+          system=$(nix eval --impure --raw --expr builtins.currentSystem)
+          nix eval --no-update-lock-file --json \
+              .#.checks.${system} \
+              --apply 'checks: map (check: check.drvPath + "^*") (builtins.attrValues checks)' \
+            | jq --raw-output '.[]' \
+            | xargs nix build --no-update-lock-file --keep-going --print-build-logs \
+                --out-link .gc-roots/check
+
+      - name: Save flake inputs
+        shell: bash -euo pipefail {0}
+        run: |
+          # Create gc roots pointing to flake inputs.
+          nix flake archive --no-update-lock-file --json \
+            | jq --raw-output 'recurse(.inputs[]) | .path' \
+            | xargs nix build --no-update-lock-file --keep-going --print-build-logs \
+                --out-link .gc-roots/input
