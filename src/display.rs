@@ -69,7 +69,7 @@ fn display_command_arg(arg: &str) -> impl fmt::Display {
     }
 
     fmt::from_fn(move |f| {
-        if arg.chars().any(needs_quoting) {
+        if arg.is_empty() || arg.chars().any(needs_quoting) {
             write!(f, "{arg:?}")
         } else {
             write!(f, "{arg}")
