@@ -73,6 +73,9 @@
             package
             treefmtEval.config.build.devShell
           ];
+          packages = [
+            pkgs.cargo-deny
+          ];
         };
 
         formatter = treefmtEval.config.build.wrapper;

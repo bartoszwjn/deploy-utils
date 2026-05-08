@@ -1,0 +1,51 @@
+[graph]
+targets = [
+  # keep-sorted start
+  "aarch64-apple-darwin",
+  "aarch64-unknown-linux-gnu",
+  "x86_64-apple-darwin",
+  "x86_64-unknown-linux-gnu",
+  # keep-sorted end
+]
+
+[output]
+feature-depth = 1
+
+
+[licenses]
+include-dev = false
+include-build = true
+allow = [
+  # keep-sorted start
+  "Apache-2.0",
+  "CC0-1.0",
+  "MIT",
+  "Unicode-3.0",
+  # keep-sorted end
+]
+confidence-threshold = 0.95
+unused-allowed-license = "allow"
+unused-license-exception = "deny"
+
+[licenses.private]
+ignore = false
+
+
+[bans]
+multiple-versions = "warn"
+multiple-versions-include-dev = true
+wildcards = "deny"
+allow-wildcard-paths = true
+highlight = "all"
+external-default-features = "allow"
+workspace-default-features = "allow"
+
+[bans.workspace-dependencies]
+duplicates = "allow"
+unused = "deny"
+
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]

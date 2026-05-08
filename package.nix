@@ -21,6 +21,11 @@ let
     commonArgs // { cargoClippyExtraArgs = "--all-targets -- --deny warnings"; }
   );
 
+  deny = craneLib.cargoDeny {
+    inherit (baseArgs) src strictDeps;
+    cargoDenyChecks = "bans licenses sources";
+  };
+
   doc = craneLib.cargoDoc (commonArgs // { env.RUSTDOCFLAGS = "--deny warnings"; });
 
   fmt = craneLib.cargoFmt { inherit (baseArgs) src strictDeps; };
@@ -47,10 +52,13 @@ craneLib.buildPackage (
 
     passthru.tests = {
       inherit
+        # keep-sorted start
         clippy
+        deny
         doc
         fmt
         test
+        # keep-sorted end
         ;
     };
   }
