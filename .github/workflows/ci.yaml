@@ -24,8 +24,9 @@ jobs:
       fail-fast: false
       matrix:
         os:
-          - { runner: ubuntu-latest, nix_system: x86_64-linux }
-          - { runner: macos-latest, nix_system: aarch64-darwin }
+          - { runner: ubuntu-24.04, nix_system: x86_64-linux }
+          - { runner: ubuntu-24.04-arm, nix_system: aarch64-linux }
+          - { runner: macos-26, nix_system: aarch64-darwin }
     runs-on: ${{ matrix.os.runner }}
     steps:
       - name: Checkout
