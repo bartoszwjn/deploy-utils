@@ -42,7 +42,7 @@ jobs:
       - name: Cache Nix store
         uses: nix-community/cache-nix-action@7df957e333c1e5da7721f60227dbba6d06080569 # v7.0.2
         with:
-          primary-key: nix-${{ matrix.os.nix_system }}-${{ hashFiles('flake.lock', 'rust-toolchain.toml') }}-${{ hashFiles('Cargo.lock') }}
+          primary-key: nix-${{ matrix.os.nix_system }}-${{ hashFiles('flake.lock', 'rust-toolchain.toml') }}-${{ hashFiles('Cargo.toml', 'Cargo.lock') }}
           restore-prefixes-first-match: |
             nix-${{ matrix.os.nix_system }}-${{ hashFiles('flake.lock', 'rust-toolchain.toml') }}-
             nix-${{ matrix.os.nix_system }}-
