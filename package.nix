@@ -4,7 +4,16 @@
 }:
 
 let
-  src = craneLib.cleanCargoSource ./.;
+  fs = lib.fileset;
+
+  src = fs.toSource {
+    root = ./.;
+    fileset = fs.unions [
+      (fs.fromSource (craneLib.cleanCargoSource ./.))
+      (fs.fileFilter (file: file.hasExt "nix") ./src)
+      (fs.fileFilter (file: file.hasExt "sh") ./src)
+    ];
+  };
   cargoToml = lib.importTOML ./Cargo.toml;
 
   baseArgs = {

@@ -326,27 +326,10 @@ impl ProfileInfo {
 }
 
 fn eval_deploy(flake: &str) -> eyre::Result<Deploy> {
-    // The `path` attribute of a profile is the only part that can be expensive to evaluate,
-    // we can keep everything else.
-    const REMOVE_PROFILE_PATH_EXPR: &str = "\
-        deploy: deploy // { \
-            nodes = builtins.mapAttrs (name: node: node // { \
-                profiles = builtins.mapAttrs (name: profile: \
-                    builtins.removeAttrs profile [\"path\"]\
-                ) node.profiles; \
-            }) deploy.nodes; \
-        }\
-    ";
-
     let mut cmd = Command::new("nix");
-    cmd.args([
-        "eval",
-        "--json",
-        "--apply",
-        REMOVE_PROFILE_PATH_EXPR,
-        "--",
-        &format!("{flake}#.deploy"),
-    ]);
+    cmd.args(["eval", "--json"])
+        .args(["--apply", include_str!("profile/filter_deploy.nix")])
+        .args(["--", &format!("{flake}#.deploy")]);
     command::output(cmd)
         .and_then(|output| output.json())
         .map_err(|e| e.into_eyre())

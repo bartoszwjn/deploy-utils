@@ -99,45 +99,24 @@ impl StatusArgs {
     }
 
     fn spawn_query_job(profile: &ProfileInfo) -> eyre::Result<CmdChild> {
-        const CHECK_PROFILE_SCRIPT: &str = "\
-            if [ -L \"$1\" ]; then \
-                deployed=$(realpath \"$1\"); \
-                if [ \"$1\" = /nix/var/nix/profiles/system ]; then \
-                    inner=$(dirname \"$(realpath \"$deployed/activate\")\"); \
-                    active=$(realpath /run/current-system); \
-                    if [ \"$inner\" = \"$active\" ]; then \
-                        printf \"valid;%s\" \"$deployed\"; \
-                    else \
-                        printf \"needs reboot;%s\" \"$deployed\"; \
-                    fi \
-                else \
-                    printf \"valid;%s\" \"$deployed\"; \
-                fi \
-            elif [ -e \"$1\" ]; then \
-                printf \"invalid;\"; \
-            else \
-                printf \"missing;\"; \
-            fi\
-        ";
-
         // ssh runs the given command by concatenating arguments with spaces
         // and running that in a shell,
         // so we need to take care of quoting ourselves.
         let quote = |arg: &str| format!("'{}'", arg.replace('\'', "'\\''"));
 
         let mut cmd = Command::new("ssh");
-        cmd.args(["-T", "-o", "ConnectTimeout=3"]);
-        cmd.args(&profile.ssh_opts);
-        cmd.args(["-o", &format!("User={}", profile.ssh_user)]);
-        cmd.args([
-            &profile.hostname,
-            "--",
-            "/bin/sh",
-            "-c",
-            &quote(CHECK_PROFILE_SCRIPT),
-            "sh",
-            &quote(&profile.profile_path),
-        ]);
+        cmd.args(["-T", "-o", "ConnectTimeout=3"])
+            .args(&profile.ssh_opts)
+            .args(["-o", &format!("User={}", profile.ssh_user)])
+            .args([
+                &profile.hostname,
+                "--",
+                "/bin/sh",
+                "-c",
+                &quote(include_str!("status/check_profile.sh")),
+                "sh",
+                &quote(&profile.profile_path),
+            ]);
 
         command::spawn_piped(cmd).map_err(|err| err.into_eyre())
     }
