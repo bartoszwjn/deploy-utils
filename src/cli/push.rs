@@ -3,7 +3,7 @@
 use std::{fmt, process::Command};
 
 use crate::{
-    command, display,
+    command, display, nix,
     profile::{ProfileInfo, Profiles},
     target::Target,
 };
@@ -43,7 +43,7 @@ impl PushArgs {
             let profiles = node.profiles();
             let mut node_results = Vec::with_capacity(profiles.len());
             for profile in profiles {
-                let status = self.push_closure(profile)?;
+                let status = self.push_profile(profile)?;
                 node_results.push((profile, status));
             }
             results.push(node_results);
@@ -54,12 +54,54 @@ impl PushArgs {
         Ok(())
     }
 
-    fn push_closure(&self, profile: &ProfileInfo) -> eyre::Result<PushStatus> {
-        tracing::info!(
-            node = profile.node,
-            profile = profile.profile,
-            "copying profile closure",
-        );
+    #[tracing::instrument(
+        level = "error",
+        skip_all,
+        fields(node = profile.node, profile = profile.profile),
+    )]
+    fn push_profile(&self, profile: &ProfileInfo) -> eyre::Result<Status> {
+        let Some(eval_result) = self.eval_profile(profile)? else {
+            return Ok(Status::Failure);
+        };
+        if let Status::Failure = self.build_profile(&eval_result.drv)? {
+            return Ok(Status::Failure);
+        }
+        self.copy_profile(profile, &eval_result.out)
+    }
+
+    fn eval_profile(&self, profile: &ProfileInfo) -> eyre::Result<Option<EvalResult>> {
+        tracing::info!("evaluating profile path");
+
+        let mut cmd = Command::new("nix");
+        cmd.args(["eval", "--json"])
+            .args([
+                "--apply",
+                &format!(
+                    "({}) {{ node = {}; profile = {}; }}",
+                    include_str!("push/eval_profile.nix"),
+                    nix::to_string_literal(&profile.node),
+                    nix::to_string_literal(&profile.profile),
+                ),
+            ])
+            .args(["--", &format!("{}#.deploy", self.flake)]);
+        nix::run_eval::<EvalResult>(cmd)
+    }
+
+    fn build_profile(&self, drv_path: &str) -> eyre::Result<Status> {
+        tracing::info!("building profile path");
+
+        let mut cmd = Command::new("nix");
+        cmd.args(["build", "--no-link", &format!("{drv_path}^*")]);
+
+        match command::run(cmd) {
+            Ok(()) => Ok(Status::Success),
+            Err(error) if error.is_exit_code_error() => Ok(Status::Failure),
+            Err(error) => Err(error.into_eyre()),
+        }
+    }
+
+    fn copy_profile(&self, profile: &ProfileInfo, out_path: &str) -> eyre::Result<Status> {
+        tracing::info!("copying profile closure");
 
         let mut cmd = Command::new("nix");
         cmd.arg("copy");
@@ -70,22 +112,18 @@ impl PushArgs {
             "--to",
             &format!("ssh://{}@{}", profile.ssh_user, profile.hostname),
             "--",
-            &format!(
-                // TODO: find a way to properly escape node and profile name
-                "{}#.deploy.nodes.{}.profiles.{}.path",
-                self.flake, profile.node, profile.profile
-            ),
+            out_path,
         ]);
         cmd.env("NIX_SSHOPTS", profile.get_nix_sshopts());
 
         match command::run(cmd) {
-            Ok(()) => Ok(PushStatus::Success),
-            Err(error) if error.is_exit_code_error() => Ok(PushStatus::Failure),
+            Ok(()) => Ok(Status::Success),
+            Err(error) if error.is_exit_code_error() => Ok(Status::Failure),
             Err(error) => Err(error.into_eyre()),
         }
     }
 
-    fn display_results(&self, results: &[Vec<(&ProfileInfo, PushStatus)>]) -> impl fmt::Display {
+    fn display_results(&self, results: &[Vec<(&ProfileInfo, Status)>]) -> impl fmt::Display {
         use display::styles::{HEADER, NODE, PROFILE};
 
         let node_width = display::get_max_width(
@@ -124,13 +162,19 @@ impl PushArgs {
     }
 }
 
+#[derive(Debug, serde::Deserialize)]
+struct EvalResult {
+    drv: String,
+    out: String,
+}
+
 #[derive(Debug)]
-enum PushStatus {
+enum Status {
     Success,
     Failure,
 }
 
-impl fmt::Display for PushStatus {
+impl fmt::Display for Status {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         use display::styles::{FAILURE, SUCCESS};
 

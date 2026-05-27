@@ -57,11 +57,10 @@ Currently this is fully sequential.
 
 Expected upcoming changes:
 
-- handle node and profile names that are not valid Nix identifiers
-- use [`nix-eval-jobs`] for faster parallel evaluation and better control over memory usage
-- parallelize the `push` subcommand
 - use `sudo` when querying deployed profile path if `sshUser` and `user` are not the same
+- parallelize the `push` subcommand
 - use async to make parallelization less awkward
+- use [`nix-eval-jobs`] for faster parallel evaluation and better control over memory usage
 
 [`deploy-rs`]: https://github.com/serokell/deploy-rs
 [`nix-eval-jobs`]: https://github.com/NixOS/nix-eval-jobs

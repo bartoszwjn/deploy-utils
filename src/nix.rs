@@ -1,6 +1,33 @@
 //! Utilities for working with Nix.
 
-use std::fmt;
+use std::{fmt, process::Command};
+
+use serde::de::DeserializeOwned;
+
+use crate::{command, display};
+
+pub(crate) fn run_eval<T: DeserializeOwned>(command: Command) -> eyre::Result<Option<T>> {
+    match command::output(command).and_then(|output| output.json::<T>()) {
+        Ok(output) => Ok(Some(output)),
+        Err(error) if error.is_exit_code_error() => {
+            let stderr = String::from_utf8_lossy(error.stderr().unwrap_or(&[]));
+            if stderr.is_empty() {
+                tracing::error!("nix eval failed:\n  Captured stderr is empty");
+            } else {
+                tracing::error!(
+                    "nix eval failed:\n  Catpured stderr:\n{}",
+                    display::indent(4, &stderr),
+                );
+            }
+            Ok(None)
+        }
+        Err(error) if error.is_json_error() => {
+            tracing::error!(error = &error as &(dyn std::error::Error + Send + Sync));
+            Ok(None)
+        }
+        Err(error) => Err(error.into_eyre()),
+    }
+}
 
 /// Formats a given string as a string literal value in the Nix expression language.
 ///

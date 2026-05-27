@@ -233,26 +233,7 @@ impl StatusArgs {
             ])
             .args(["--", &format!("{}#.deploy", self.flake)]);
 
-        match command::output(cmd).and_then(|o| o.json::<String>()) {
-            Ok(local_path) => Ok(Some(local_path)),
-            Err(error) if error.is_exit_code_error() => {
-                let stderr = String::from_utf8_lossy(error.stderr().unwrap_or(&[]));
-                if stderr.is_empty() {
-                    tracing::error!("nix eval failed:\n  Captured stderr is empty");
-                } else {
-                    tracing::error!(
-                        "nix eval failed:\n  Catpured stderr:\n{}",
-                        display::indent(4, &stderr),
-                    );
-                }
-                Ok(None)
-            }
-            Err(error) if error.is_json_error() => {
-                tracing::error!(error = &error as &(dyn std::error::Error + Send + Sync));
-                Ok(None)
-            }
-            Err(error) => Err(error.into_eyre()),
-        }
+        nix::run_eval::<String>(cmd)
     }
 
     fn display_results(&self, results: &[Vec<EvalResult<'_>>]) -> impl fmt::Display {
