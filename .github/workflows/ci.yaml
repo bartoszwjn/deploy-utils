@@ -12,6 +12,10 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+defaults:
+  run:
+    shell: bash --noprofile --norc -euo pipefail -- {0}
+
 jobs:
   nix-checks:
     name: Nix checks - ${{ matrix.os }}
@@ -50,7 +54,6 @@ jobs:
           purge-last-accessed: P2D
 
       - name: Run nix checks
-        shell: bash -euo pipefail {0}
         run: |
           # Build all check outputs of the flake, just like `nix flake check`,
           # but also create gc roots.
@@ -63,7 +66,6 @@ jobs:
                 --out-link .gc-roots/check
 
       - name: Save flake inputs
-        shell: bash -euo pipefail {0}
         run: |
           # Create gc roots pointing to flake inputs.
           nix flake archive --no-update-lock-file --json \
