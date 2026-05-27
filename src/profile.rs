@@ -1,7 +1,7 @@
 //! Querying information about `deploy-rs` profiles.
 
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, HashMap, HashSet},
     fmt::{self, Write},
     process::Command,
 };
@@ -9,19 +9,21 @@ use std::{
 use color_eyre::Section;
 use eyre::WrapErr;
 
-use crate::{cli::ProfileOptionOverrides, command, display, natural_sort::NaturalString};
+use crate::{
+    cli::ProfileOptionOverrides, command, display, natural_sort::NaturalString, target::Target,
+};
 
-#[derive(Debug)]
+#[derive(Debug, Eq, PartialEq)]
 pub(crate) struct Profiles {
     nodes: BTreeMap<NaturalString<'static>, NodeInfo>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Eq, PartialEq)]
 pub(crate) struct NodeInfo {
     profiles: BTreeMap<NaturalString<'static>, ProfileInfo>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Eq, PartialEq)]
 pub(crate) struct ProfileInfo {
     pub(crate) node: String,
     pub(crate) profile: String,
@@ -70,24 +72,54 @@ impl Profiles {
         Ok(this)
     }
 
-    pub(crate) fn select(mut self, nodes: Option<&[String]>) -> eyre::Result<Self> {
-        let Some(nodes) = nodes else {
+    pub(crate) fn select(mut self, targets: Option<&[Target]>) -> eyre::Result<Self> {
+        let Some(targets) = targets else {
             return Ok(self);
         };
 
-        for node in nodes {
-            if !self.nodes.contains_key(&NaturalString::borrowed(node)) {
-                let all_nodes: Vec<_> = self.nodes.keys().map(|n| n.as_str()).collect();
-
+        let mut selection = HashMap::new();
+        for target in targets {
+            let node = target.node();
+            let Some(node_info) = self.nodes.get(&NaturalString::borrowed(node)) else {
+                let all_nodes = Self::map_keys(&self.nodes).join(", ");
                 return Err(eyre::eyre!("no profiles defined for node {node}")).note(format!(
-                    "profiles exist for the following nodes: {}",
-                    all_nodes.join(", ")
+                    "profiles exist for the following nodes: {all_nodes}"
                 ));
+            };
+
+            let selected_profiles = selection
+                .entry(node)
+                .or_insert_with(|| Some(HashSet::new()));
+            if let Some(profile) = target.profile() {
+                if !node_info
+                    .profiles
+                    .contains_key(&NaturalString::borrowed(profile))
+                {
+                    let all_profiles = Self::map_keys(&node_info.profiles).join(", ");
+                    return Err(
+                        eyre::eyre!("node {node} does not have a profile named {profile}")
+                            .note(format!("profiles defined for node {node}: {all_profiles}")),
+                    );
+                }
+                if let Some(set) = selected_profiles {
+                    set.insert(profile);
+                }
+            } else {
+                *selected_profiles = None;
             }
         }
 
         self.nodes
-            .retain(|node, _| nodes.iter().any(|n| node.as_str() == n));
+            .retain(|node, node_info| match selection.get(node.as_str()) {
+                None => false,
+                Some(None) => true,
+                Some(Some(selected_profiles)) => {
+                    node_info
+                        .profiles
+                        .retain(|profile, _| selected_profiles.contains(profile.as_str()));
+                    true
+                }
+            });
 
         tracing::debug!(
             num_nodes = self.nodes.len(),
@@ -133,6 +165,10 @@ impl Profiles {
 
     pub(crate) fn profiles(&self) -> impl Iterator<Item = &ProfileInfo> {
         self.nodes().flat_map(NodeInfo::profiles)
+    }
+
+    fn map_keys<'a, T>(map: &'a BTreeMap<NaturalString<'a>, T>) -> Vec<&'a str> {
+        map.keys().map(|n| n.as_str()).collect()
     }
 }
 
@@ -389,4 +425,130 @@ struct GenericOptions {
     ssh_opts: Vec<String>,
     user: Option<String>,
     fast_connection: Option<bool>,
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{natural_sort::NaturalString, target::Target};
+
+    use super::{NodeInfo, ProfileInfo, Profiles};
+
+    type ProfilesInput<'a> = &'a [(&'a str, &'a [&'a str])];
+
+    fn mk_profiles(nodes: ProfilesInput<'_>) -> Profiles {
+        let nodes = nodes
+            .iter()
+            .map(|&(node, profiles)| {
+                (
+                    NaturalString::owned(node.to_owned()),
+                    mk_node_info(node, profiles),
+                )
+            })
+            .collect();
+        Profiles { nodes }
+    }
+
+    fn mk_node_info(node: &str, profiles: &[&str]) -> NodeInfo {
+        let profiles = profiles
+            .iter()
+            .map(|&profile| {
+                (
+                    NaturalString::owned(profile.to_owned()),
+                    mk_profile_info(node, profile),
+                )
+            })
+            .collect();
+        NodeInfo { profiles }
+    }
+
+    fn mk_profile_info(node: &str, profile: &str) -> ProfileInfo {
+        ProfileInfo {
+            node: node.into(),
+            profile: profile.into(),
+            hostname: "host.tld".into(),
+            profile_path: "/nix/var/nix/profiles/profile".into(),
+            user: "root".into(),
+            ssh_user: "root".into(),
+            ssh_opts: vec![],
+            fast_connection: false,
+        }
+    }
+
+    #[test]
+    fn select() {
+        let cases: [(&str, ProfilesInput<'_>, &[&str], ProfilesInput<'_>); _] = [
+            ("empty", &[], &[], &[]),
+            (
+                "select node",
+                &[("n1", &["p1", "p2", "p3"]), ("n2", &["p1", "p2"])],
+                &["n1"],
+                &[("n1", &["p1", "p2", "p3"])],
+            ),
+            (
+                "select profile",
+                &[("n1", &["p1", "p2", "p3"]), ("n2", &["p1", "p2"])],
+                &["n1.p2"],
+                &[("n1", &["p2"])],
+            ),
+            (
+                "select mixed",
+                &[("n1", &["p1", "p2", "p3"]), ("n2", &["p1", "p2"])],
+                &["n1.p1", "n1.p3", "n2"],
+                &[("n1", &["p1", "p3"]), ("n2", &["p1", "p2"])],
+            ),
+            (
+                "select mixed on same node",
+                &[("n1", &["p1", "p2", "p3"]), ("n2", &["p1", "p2"])],
+                &["n1.p1", "n1"],
+                &[("n1", &["p1", "p2", "p3"])],
+            ),
+        ];
+
+        for (case_name, initial, targets, expected) in cases {
+            let initial = mk_profiles(initial);
+            let targets: Vec<Target> = targets.iter().map(|t| t.parse().unwrap()).collect();
+            let expected = mk_profiles(expected);
+            let result = initial.select(Some(&targets)).unwrap();
+            assert_eq!(
+                expected, result,
+                "{case_name}: unexpected result of Profiles::select"
+            );
+        }
+    }
+
+    #[test]
+    fn select_errors() {
+        let cases: [(&str, ProfilesInput<'_>, &[&str], &str); _] = [
+            ("empty", &[], &["n1"], "no profiles defined for node n1"),
+            (
+                "no node",
+                &[("n1", &["p1", "p2"])],
+                &["n2"],
+                "no profiles defined for node n2",
+            ),
+            (
+                "no profile",
+                &[("n1", &["p1", "p2"]), ("n2", &["p3"])],
+                &["n1.p3"],
+                "node n1 does not have a profile named p3",
+            ),
+            (
+                "no profile mixed selection",
+                &[("n1", &["p1", "p2"])],
+                &["n1", "n1.p1", "n1.p3"],
+                "node n1 does not have a profile named p3",
+            ),
+        ];
+
+        for (case_name, initial, targets, expected) in cases {
+            let initial = mk_profiles(initial);
+            let targets: Vec<Target> = targets.iter().map(|t| t.parse().unwrap()).collect();
+            let result = initial.select(Some(&targets)).unwrap_err();
+            assert_eq!(
+                expected,
+                result.to_string(),
+                "{case_name}: unexpected error from Profiles::select"
+            );
+        }
+    }
 }

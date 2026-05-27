@@ -57,7 +57,6 @@ Currently this is fully sequential.
 
 Expected upcoming changes:
 
-- allow selecting specific profiles from a node
 - handle node and profile names that are not valid Nix identifiers
 - use [`nix-eval-jobs`] for faster parallel evaluation and better control over memory usage
 - parallelize the `push` subcommand

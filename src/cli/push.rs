@@ -5,6 +5,7 @@ use std::{fmt, process::Command};
 use crate::{
     command, display,
     profile::{ProfileInfo, Profiles},
+    target::Target,
 };
 
 use super::ProfileOptionOverrides;
@@ -12,11 +13,15 @@ use super::ProfileOptionOverrides;
 /// `nix copy` all profile closures to their respective nodes without deploying them.
 #[derive(clap::Args, Debug)]
 pub(super) struct PushArgs {
-    /// Push profiles to given node(s) only.
+    /// Push profiles to given target(s) only.
     ///
     /// The default is to push all profiles.
-    /// When at least one node name is specified, only profiles from these nodes are pushed.
-    nodes: Option<Vec<String>>,
+    ///
+    /// A target can be a node name or a node and profile name separated by a dot.
+    ///
+    /// Node and profile names containing dots need to be surrounded with double quotes (`"`).
+    #[arg(value_name = "TARGET")]
+    targets: Option<Vec<Target>>,
 
     /// The flake to use as a source of profiles.
     #[arg(long, default_value = ".")]
@@ -29,7 +34,7 @@ pub(super) struct PushArgs {
 impl PushArgs {
     pub(super) fn exec(self) -> eyre::Result<()> {
         let profiles =
-            Profiles::eval(&self.flake, &self.overrides)?.select(self.nodes.as_deref())?;
+            Profiles::eval(&self.flake, &self.overrides)?.select(self.targets.as_deref())?;
         anstream::println!("{}", profiles.display());
 
         let nodes = profiles.nodes();

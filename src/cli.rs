@@ -51,6 +51,7 @@ pub(crate) struct ProfileOptionOverrides {
     /// In most shells the `;` argument needs to be quoted.
     #[arg(
         long,
+        value_name = "SSH_OPT",
         num_args = 0..,
         allow_hyphen_values = true,
         value_terminator = ";",

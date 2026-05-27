@@ -10,6 +10,7 @@ use crate::{
     command::{self, CmdChild},
     display,
     profile::{ProfileInfo, Profiles},
+    target::Target,
 };
 
 use super::ProfileOptionOverrides;
@@ -17,11 +18,15 @@ use super::ProfileOptionOverrides;
 /// Compare deployed profiles with local configuration.
 #[derive(clap::Args, Debug)]
 pub(super) struct StatusArgs {
-    /// Compare profiles from given node(s) only.
+    /// Compare profiles from given target(s) only.
     ///
     /// The default is to compare all profiles.
-    /// When at least one node name is specified, only profiles from these nodes are compared.
-    nodes: Option<Vec<String>>,
+    ///
+    /// A target can be a node name or a node and profile name separated by a dot.
+    ///
+    /// Node and profile names containing dots need to be surrounded with double quotes (`"`).
+    #[arg(value_name = "TARGET")]
+    targets: Option<Vec<Target>>,
 
     /// The flake to use as a source of profiles.
     #[arg(long, default_value = ".")]
@@ -46,7 +51,7 @@ pub(super) struct StatusArgs {
 impl StatusArgs {
     pub(super) fn exec(self) -> eyre::Result<()> {
         let profiles =
-            Profiles::eval(&self.flake, &self.overrides)?.select(self.nodes.as_deref())?;
+            Profiles::eval(&self.flake, &self.overrides)?.select(self.targets.as_deref())?;
         anstream::println!("{}", profiles.display());
 
         let with_remote = self.query_deployed_profiles(&profiles)?;
