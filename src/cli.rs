@@ -34,6 +34,14 @@ pub(crate) struct ProfileOptionOverrides {
     #[arg(long)]
     pub(crate) profile_user: Option<String>,
 
+    /// Override each profile's `sudo` with the given value.
+    #[arg(long)]
+    pub(crate) sudo: Option<String>,
+
+    /// Override each profile's `interactiveSudo` with the given value.
+    #[arg(long)]
+    pub(crate) interactive_sudo: Option<bool>,
+
     /// Override each profile's `sshUser` with the given value.
     #[arg(long)]
     pub(crate) ssh_user: Option<String>,

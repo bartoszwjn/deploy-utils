@@ -32,6 +32,8 @@ pub(crate) struct ProfileInfo {
     pub(crate) user: String,
     pub(crate) ssh_user: String,
     pub(crate) ssh_opts: Vec<String>,
+    pub(crate) sudo: String,
+    pub(crate) use_sudo: bool,
     pub(crate) fast_connection: bool,
 }
 
@@ -204,6 +206,9 @@ impl ProfileInfo {
             None => whoami::username().wrap_err("could not determine current user's username")?,
         };
         let ssh_opts = generic_opts.ssh_opts;
+        let sudo = generic_opts.sudo.unwrap_or_else(|| "sudo -u".to_owned());
+        let interactive_sudo = generic_opts.interactive_sudo.unwrap_or(false);
+        let use_sudo = user != ssh_user;
         let fast_connection = generic_opts.fast_connection.unwrap_or(false);
 
         let profile_path = if let Some(explicit) = profile.profile_path {
@@ -229,27 +234,40 @@ impl ProfileInfo {
             }
         };
 
+        if use_sudo && interactive_sudo {
+            eyre::bail!("profiles using interactive sudo are not supported");
+        }
+
         Ok(Self {
             node: node_name.to_owned(),
             profile: profile_name.to_owned(),
             hostname,
             profile_path,
+            user,
             ssh_user,
             ssh_opts,
-            user,
+            sudo,
+            use_sudo,
             fast_connection,
         })
     }
 
     fn display(&self, profile_width: usize) -> impl fmt::Display {
-        use display::styles::{FAST, HOSTNAME, PATH, PROFILE, SSH_OPTS, SSH_USER, USER};
+        use display::styles::{FAST, HOSTNAME, PATH, PROFILE, SSH_OPTS, SSH_USER, SUDO, USER};
 
         fmt::from_fn(move |f| {
             write!(
                 f,
-                "{PROFILE}{:profile_width$}{PROFILE:#} as {USER}{}{USER:#} \
-                    at {SSH_USER}{}{SSH_USER:#}@{HOSTNAME}{}{HOSTNAME:#}:{PATH}{}{PATH:#}",
-                self.profile, self.user, self.ssh_user, self.hostname, self.profile_path,
+                "{PROFILE}{:profile_width$}{PROFILE:#} as {USER}{}{USER:#}",
+                self.profile, self.user
+            )?;
+            if self.use_sudo {
+                write!(f, " via {SUDO}{}{SUDO:#}", self.sudo)?;
+            }
+            write!(
+                f,
+                " at {SSH_USER}{}{SSH_USER:#}@{HOSTNAME}{}{HOSTNAME:#}:{PATH}{}{PATH:#}",
+                self.ssh_user, self.hostname, self.profile_path,
             )?;
             if self.fast_connection {
                 write!(f, " {FAST}(fast){FAST:#}")?;
@@ -359,6 +377,16 @@ fn combine_generic_options(
         .or_else(|| node.user.clone())
         .or_else(|| deploy.user.clone());
 
+    let sudo = (overrides.sudo.clone())
+        .or_else(|| profile.sudo.clone())
+        .or_else(|| node.sudo.clone())
+        .or_else(|| deploy.sudo.clone());
+
+    let interactive_sudo = (overrides.interactive_sudo)
+        .or(profile.interactive_sudo)
+        .or(node.interactive_sudo)
+        .or(deploy.interactive_sudo);
+
     let fast_connection = (overrides.fast_connection)
         .or(profile.fast_connection)
         .or(node.fast_connection)
@@ -368,6 +396,8 @@ fn combine_generic_options(
         ssh_user,
         ssh_opts,
         user,
+        sudo,
+        interactive_sudo,
         fast_connection,
     }
 }
@@ -407,6 +437,8 @@ struct GenericOptions {
     #[serde(default)]
     ssh_opts: Vec<String>,
     user: Option<String>,
+    sudo: Option<String>,
+    interactive_sudo: Option<bool>,
     fast_connection: Option<bool>,
 }
 
@@ -453,6 +485,8 @@ mod tests {
             user: "root".into(),
             ssh_user: "root".into(),
             ssh_opts: vec![],
+            sudo: "sudo -u".into(),
+            use_sudo: false,
             fast_connection: false,
         }
     }

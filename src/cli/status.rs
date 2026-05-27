@@ -108,15 +108,23 @@ impl StatusArgs {
         cmd.args(["-T", "-o", "ConnectTimeout=3"])
             .args(&profile.ssh_opts)
             .args(["-o", &format!("User={}", profile.ssh_user)])
-            .args([
-                &profile.hostname,
-                "--",
-                "/bin/sh",
-                "-c",
-                &quote(include_str!("status/check_profile.sh")),
-                "sh",
-                &quote(&profile.profile_path),
+            .args([&profile.hostname, "--"]);
+        if profile.use_sudo {
+            cmd.args([
+                // Intentionally without quoting,
+                // as it's a single string that can contain both the command and extra arguments,
+                // e.g. "sudo -u" (which is the default).
+                &profile.sudo,
+                &profile.user,
             ]);
+        }
+        cmd.args([
+            "/bin/sh",
+            "-c",
+            &quote(include_str!("status/check_profile.sh")),
+            "sh",
+            &quote(&profile.profile_path),
+        ]);
 
         command::spawn_piped(cmd).map_err(|err| err.into_eyre())
     }
