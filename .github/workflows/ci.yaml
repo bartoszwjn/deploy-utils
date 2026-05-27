@@ -19,9 +19,6 @@ defaults:
 jobs:
   nix-checks:
     name: Nix checks - ${{ matrix.os }}
-    permissions:
-      contents: read
-      actions: write # Needed for purging Nix cache
     timeout-minutes: 15
     strategy:
       fail-fast: false
@@ -48,10 +45,6 @@ jobs:
             nix-${{ runner.os }}-${{ hashFiles('flake.lock', 'rust-toolchain.toml') }}-
             nix-${{ runner.os }}-
           gc-max-store-size: 0
-          purge: true
-          purge-primary-key: never
-          purge-prefixes: nix-${{ runner.os }}-
-          purge-last-accessed: P2D
 
       - name: Run nix checks
         run: |
