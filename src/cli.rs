@@ -40,25 +40,15 @@ pub(crate) struct ProfileOptionOverrides {
 
     /// Override each profile's `sshOpts` with the given value(s).
     ///
-    /// Note on parsing: after encountering `--ssh-opts` all further arguments will be treated
-    /// as values for this option, until an optional end marker value `;` is encountered.
+    /// Note on parsing: after encountering `--ssh-opts` all further arguments
+    /// will be treated as values for this option, until an optional end marker value `;`.
     ///
-    /// Examples of mixing `--ssh-opts` with other options (all of these are equivalent):
+    /// When mixing this option with other options, either:
+    /// - specify `--ssh-opts` last,
+    /// - use `;` to mark where values for `--ssh-opts` end,
+    /// - use `--ssh-opts=<value>` to pass one value at a time (can be repeated).
     ///
-    /// - Specify `--ssh-opts` last:
-    ///
-    ///   `<subcommand> --hostname foo --ssh-opts -p 22`
-    ///
-    /// - Use the `;` end marker:
-    ///
-    ///   `<subcommand> --ssh-opts -p 22 ";" --hostname foo`
-    ///
-    /// - Add one value at a time with `--ssh-opts=`:
-    ///
-    ///   `<subcommand> --ssh-opts=-p --ssh-opts=22 --hostname foo`
-    ///
-    /// In most shells the `;` argument will need to be surrounded with quotes in order to avoid
-    /// being interpreted by the shell as an end-of-command marker.
+    /// In most shells the `;` argument needs to be quoted.
     #[arg(
         long,
         num_args = 0..,
