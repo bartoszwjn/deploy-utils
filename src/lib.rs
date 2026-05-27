@@ -2,6 +2,7 @@ mod cli;
 mod command;
 mod display;
 mod natural_sort;
+mod nix;
 mod profile;
 mod target;
 

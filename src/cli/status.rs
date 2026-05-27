@@ -8,7 +8,7 @@ use rayon::iter::{IntoParallelIterator, ParallelIterator};
 
 use crate::{
     command::{self, CmdChild},
-    display,
+    display, nix,
     profile::{ProfileInfo, Profiles},
     target::Target,
 };
@@ -221,12 +221,17 @@ impl StatusArgs {
         }
 
         let mut cmd = Command::new("nix");
-        cmd.args(["eval", "--json", "--"]);
-        cmd.arg(format!(
-            // TODO: find a way to properly escape node and profile name
-            "{}#.deploy.nodes.{}.profiles.{}.path.outPath",
-            self.flake, profile.node, profile.profile
-        ));
+        cmd.args(["eval", "--json"])
+            .args([
+                "--apply",
+                &format!(
+                    "({}) {{ node = {}; profile = {}; }}",
+                    include_str!("status/get_profile_path.nix"),
+                    nix::to_string_literal(&profile.node),
+                    nix::to_string_literal(&profile.profile),
+                ),
+            ])
+            .args(["--", &format!("{}#.deploy", self.flake)]);
 
         match command::output(cmd).and_then(|o| o.json::<String>()) {
             Ok(local_path) => Ok(Some(local_path)),
