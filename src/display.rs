@@ -16,6 +16,7 @@ pub(crate) mod styles {
     pub(crate) const PROFILE: Style = AnsiColor::Cyan.on_default();
     pub(crate) const USER: Style = AnsiColor::Yellow.on_default();
     pub(crate) const SUDO: Style = AnsiColor::Magenta.on_default();
+    pub(crate) const INTERACTIVE_SUDO: Style = AnsiColor::Red.on_default();
     pub(crate) const SSH_USER: Style = AnsiColor::Yellow.on_default();
     pub(crate) const HOSTNAME: Style = AnsiColor::Green.on_default();
     pub(crate) const PATH: Style = AnsiColor::Blue.on_default();

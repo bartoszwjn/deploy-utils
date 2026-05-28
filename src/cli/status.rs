@@ -44,14 +44,21 @@ pub(super) struct StatusArgs {
     #[arg(long, short = 's')]
     show_paths: bool,
 
+    /// Use the profile's `sudo` command if configured `user` and `sshUser` are not the same.
+    ///
+    /// This is not done by default,
+    /// as profiles are often kept in directories that are already readable by all users.
+    #[arg(long)]
+    use_sudo: bool,
+
     #[command(flatten)]
     overrides: ProfileOptionOverrides,
 }
 
 impl StatusArgs {
     pub(super) fn exec(self) -> eyre::Result<()> {
-        let profiles =
-            Profiles::eval(&self.flake, &self.overrides)?.select(self.targets.as_deref())?;
+        let profiles = Profiles::eval(&self.flake, &self.overrides, self.use_sudo)?
+            .select(self.targets.as_deref())?;
         anstream::println!("{}", profiles.display());
 
         let with_remote = self.query_deployed_profiles(&profiles)?;
@@ -89,7 +96,10 @@ impl StatusArgs {
         for node in jobs {
             let mut node_results = Vec::with_capacity(node.len());
             for (profile, span, job) in node.into_iter() {
-                let result = span.in_scope(|| Self::resolve_query_job(job))?;
+                let result = span.in_scope(|| match job {
+                    Some(job) => Self::resolve_query_job(job),
+                    None => Ok(QueryResult::Unknown),
+                })?;
                 node_results.push((profile, result));
             }
             results.push(node_results);
@@ -98,7 +108,7 @@ impl StatusArgs {
         Ok(results)
     }
 
-    fn spawn_query_job(profile: &ProfileInfo) -> eyre::Result<CmdChild> {
+    fn spawn_query_job(profile: &ProfileInfo) -> eyre::Result<Option<CmdChild>> {
         // ssh runs the given command by concatenating arguments with spaces
         // and running that in a shell,
         // so we need to take care of quoting ourselves.
@@ -110,6 +120,10 @@ impl StatusArgs {
             .args(["-o", &format!("User={}", profile.ssh_user)])
             .args([&profile.hostname, "--"]);
         if profile.use_sudo {
+            if profile.interactive_sudo {
+                tracing::error!("interactive sudo is not supported");
+                return Ok(None);
+            }
             cmd.args([
                 // Intentionally without quoting,
                 // as it's a single string that can contain both the command and extra arguments,
@@ -126,7 +140,9 @@ impl StatusArgs {
             &quote(&profile.profile_path),
         ]);
 
-        command::spawn_piped(cmd).map_err(|err| err.into_eyre())
+        command::spawn_piped(cmd)
+            .map(Some)
+            .map_err(|err| err.into_eyre())
     }
 
     fn resolve_query_job(job: CmdChild) -> eyre::Result<QueryResult> {

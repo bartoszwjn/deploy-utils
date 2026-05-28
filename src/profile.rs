@@ -33,12 +33,17 @@ pub(crate) struct ProfileInfo {
     pub(crate) ssh_user: String,
     pub(crate) ssh_opts: Vec<String>,
     pub(crate) sudo: String,
+    pub(crate) interactive_sudo: bool,
     pub(crate) use_sudo: bool,
     pub(crate) fast_connection: bool,
 }
 
 impl Profiles {
-    pub(crate) fn eval(flake: &str, overrides: &ProfileOptionOverrides) -> eyre::Result<Self> {
+    pub(crate) fn eval(
+        flake: &str,
+        overrides: &ProfileOptionOverrides,
+        use_sudo: bool,
+    ) -> eyre::Result<Self> {
         tracing::debug!(flake, "evaluating deploy profiles");
 
         let mut deploy = eval_deploy(flake)?;
@@ -57,6 +62,7 @@ impl Profiles {
                     &node,
                     profile,
                     overrides,
+                    use_sudo,
                 )?;
                 profiles.insert(NaturalString::owned(profile_name), profile_info);
             }
@@ -188,6 +194,7 @@ impl ProfileInfo {
         node: &Node,
         profile: Profile,
         overrides: &ProfileOptionOverrides,
+        use_sudo: bool,
     ) -> eyre::Result<Self> {
         let generic_opts =
             combine_generic_options(&deploy.generic, &node.generic, &profile.generic, overrides);
@@ -208,7 +215,7 @@ impl ProfileInfo {
         let ssh_opts = generic_opts.ssh_opts;
         let sudo = generic_opts.sudo.unwrap_or_else(|| "sudo -u".to_owned());
         let interactive_sudo = generic_opts.interactive_sudo.unwrap_or(false);
-        let use_sudo = user != ssh_user;
+        let use_sudo = use_sudo && user != ssh_user;
         let fast_connection = generic_opts.fast_connection.unwrap_or(false);
 
         let profile_path = if let Some(explicit) = profile.profile_path {
@@ -234,10 +241,6 @@ impl ProfileInfo {
             }
         };
 
-        if use_sudo && interactive_sudo {
-            eyre::bail!("profiles using interactive sudo are not supported");
-        }
-
         Ok(Self {
             node: node_name.to_owned(),
             profile: profile_name.to_owned(),
@@ -247,13 +250,16 @@ impl ProfileInfo {
             ssh_user,
             ssh_opts,
             sudo,
+            interactive_sudo,
             use_sudo,
             fast_connection,
         })
     }
 
     fn display(&self, profile_width: usize) -> impl fmt::Display {
-        use display::styles::{FAST, HOSTNAME, PATH, PROFILE, SSH_OPTS, SSH_USER, SUDO, USER};
+        use display::styles::{
+            FAST, HOSTNAME, INTERACTIVE_SUDO, PATH, PROFILE, SSH_OPTS, SSH_USER, SUDO, USER,
+        };
 
         fmt::from_fn(move |f| {
             write!(
@@ -263,6 +269,9 @@ impl ProfileInfo {
             )?;
             if self.use_sudo {
                 write!(f, " via {SUDO}{}{SUDO:#}", self.sudo)?;
+                if self.interactive_sudo {
+                    write!(f, " {INTERACTIVE_SUDO}(interactive){INTERACTIVE_SUDO:#}")?;
+                }
             }
             write!(
                 f,
@@ -486,6 +495,7 @@ mod tests {
             ssh_user: "root".into(),
             ssh_opts: vec![],
             sudo: "sudo -u".into(),
+            interactive_sudo: false,
             use_sudo: false,
             fast_connection: false,
         }

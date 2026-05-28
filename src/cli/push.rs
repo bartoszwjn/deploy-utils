@@ -34,7 +34,7 @@ pub(super) struct PushArgs {
 impl PushArgs {
     pub(super) fn exec(self) -> eyre::Result<()> {
         let profiles =
-            Profiles::eval(&self.flake, &self.overrides)?.select(self.targets.as_deref())?;
+            Profiles::eval(&self.flake, &self.overrides, false)?.select(self.targets.as_deref())?;
         anstream::println!("{}", profiles.display());
 
         let nodes = profiles.nodes();

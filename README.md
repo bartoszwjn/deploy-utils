@@ -57,7 +57,6 @@ Currently this is fully sequential.
 
 Expected upcoming changes:
 
-- use `sudo` when querying deployed profile path if `sshUser` and `user` are not the same
 - parallelize the `push` subcommand
 - use async to make parallelization less awkward
 - use [`nix-eval-jobs`] for faster parallel evaluation and better control over memory usage
