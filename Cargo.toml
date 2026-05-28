@@ -1,6 +1,6 @@
 [package]
 name = "deploy-utils"
-version = "0.0.0"
+version = "0.1.0"
 edition = "2024"
 description = "Utilities for working with deploy-rs"
 readme = "README.md"
